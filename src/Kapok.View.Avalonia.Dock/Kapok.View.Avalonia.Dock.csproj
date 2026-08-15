@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+
+    <PackageId>Kapok.View.Avalonia.Dock</PackageId>
+    <Version>0.1.0</Version>
+    <Authors>Kapok Framework Community</Authors>
+    <RepositoryUrl>https://github.com/kapok-fwk/Kapok.View.Avalonia</RepositoryUrl>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Not yet used. Phase 3 (Dock integration) wires these up. Referenced now so the
+         solution's dependency graph is complete from Phase 0. -->
+    <PackageReference Include="Dock.Model.Mvvm" Version="12.1.0.1" />
+    <PackageReference Include="Dock.Avalonia" Version="12.1.0.1" />
+    <PackageReference Include="Dock.Avalonia.Themes.Fluent" Version="12.1.0.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Kapok.View.Avalonia\Kapok.View.Avalonia.csproj" />
+  </ItemGroup>
+
+</Project>

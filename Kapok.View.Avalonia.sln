@@ -1,0 +1,48 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{FF5B9AB4-1DC0-4F25-87AB-B2F05B57FCA0}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Kapok.View.Avalonia.UnitTest", "src\Kapok.View.Avalonia.UnitTest\Kapok.View.Avalonia.UnitTest.csproj", "{FC7F67F3-B16E-415B-B04E-2A53F7FC5A17}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Kapok.View.Avalonia", "src\Kapok.View.Avalonia\Kapok.View.Avalonia.csproj", "{238C03F3-F9F1-47F1-B4BD-94C80FB956D3}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Kapok.View.Avalonia.Dock", "src\Kapok.View.Avalonia.Dock\Kapok.View.Avalonia.Dock.csproj", "{6C9CAEC9-41D7-46FF-AFB3-9CDD8961EB30}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ToDoAvaloniaApp", "src\ToDoAvaloniaApp\ToDoAvaloniaApp.csproj", "{250BFA49-059D-49B1-90A2-EB6D8EBE8F92}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{FC7F67F3-B16E-415B-B04E-2A53F7FC5A17}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{FC7F67F3-B16E-415B-B04E-2A53F7FC5A17}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{FC7F67F3-B16E-415B-B04E-2A53F7FC5A17}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{FC7F67F3-B16E-415B-B04E-2A53F7FC5A17}.Release|Any CPU.Build.0 = Release|Any CPU
+		{238C03F3-F9F1-47F1-B4BD-94C80FB956D3}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{238C03F3-F9F1-47F1-B4BD-94C80FB956D3}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{238C03F3-F9F1-47F1-B4BD-94C80FB956D3}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{238C03F3-F9F1-47F1-B4BD-94C80FB956D3}.Release|Any CPU.Build.0 = Release|Any CPU
+		{6C9CAEC9-41D7-46FF-AFB3-9CDD8961EB30}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{6C9CAEC9-41D7-46FF-AFB3-9CDD8961EB30}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{6C9CAEC9-41D7-46FF-AFB3-9CDD8961EB30}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{6C9CAEC9-41D7-46FF-AFB3-9CDD8961EB30}.Release|Any CPU.Build.0 = Release|Any CPU
+		{250BFA49-059D-49B1-90A2-EB6D8EBE8F92}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{250BFA49-059D-49B1-90A2-EB6D8EBE8F92}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{250BFA49-059D-49B1-90A2-EB6D8EBE8F92}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{250BFA49-059D-49B1-90A2-EB6D8EBE8F92}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{FC7F67F3-B16E-415B-B04E-2A53F7FC5A17} = {FF5B9AB4-1DC0-4F25-87AB-B2F05B57FCA0}
+		{238C03F3-F9F1-47F1-B4BD-94C80FB956D3} = {FF5B9AB4-1DC0-4F25-87AB-B2F05B57FCA0}
+		{6C9CAEC9-41D7-46FF-AFB3-9CDD8961EB30} = {FF5B9AB4-1DC0-4F25-87AB-B2F05B57FCA0}
+		{250BFA49-059D-49B1-90A2-EB6D8EBE8F92} = {FF5B9AB4-1DC0-4F25-87AB-B2F05B57FCA0}
+	EndGlobalSection
+EndGlobal

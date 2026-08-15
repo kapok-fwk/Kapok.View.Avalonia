@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Avalonia.Diagnostics has not been published for the 12.x line yet (latest is 11.3.20),
+         so it's dropped rather than mixing major versions; it's a dev-only inspector overlay,
+         not needed for Phase 1. Revisit once a 12.x build is published. -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="8.0.10" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="8.0.10" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Kapok.View.Avalonia\Kapok.View.Avalonia.csproj" />
+    <ProjectReference Include="..\..\..\kapok-fwk\src\Kapok.Data.EntityFrameworkCore\Kapok.Data.EntityFrameworkCore.csproj" />
+  </ItemGroup>
+
+</Project>

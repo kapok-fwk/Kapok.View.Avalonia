@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+
+    <PackageId>Kapok.View.Avalonia</PackageId>
+    <Version>0.1.0</Version>
+    <Authors>Kapok Framework Community</Authors>
+    <RepositoryUrl>https://github.com/kapok-fwk/Kapok.View.Avalonia</RepositoryUrl>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Pinned to the latest stable line (12.1.x) rather than 11.2.x so this lines up with
+         Dock for Avalonia's packages (versioned 12.1.0.1, i.e. built against Avalonia 12.1.x),
+         needed starting Phase 3. Known open risk, to verify empirically in Phase 2: the
+         AvaloniaControls.Ribbon.Desktop package declares "Avalonia is greater or equal 11.2.3"
+         and was last published against the 11.x line; its actual compatibility with Avalonia 12
+         is unconfirmed until it's added and built against. -->
+    <PackageReference Include="Avalonia" Version="12.1.1" />
+    <PackageReference Include="Avalonia.Desktop" Version="12.1.1" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.1" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="12.1.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\kapok-fwk\src\Kapok.Acl\Kapok.Acl.csproj" />
+    <ProjectReference Include="..\..\..\kapok-fwk\src\Kapok.Core\Kapok.Core.csproj" />
+    <ProjectReference Include="..\..\..\kapok-fwk\src\Kapok.Report\Kapok.Report.csproj" />
+    <ProjectReference Include="..\..\..\kapok-fwk\src\Kapok.View\Kapok.View.csproj" />
+  </ItemGroup>
+
+</Project>
