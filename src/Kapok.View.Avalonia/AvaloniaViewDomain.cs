@@ -508,13 +508,17 @@ public class AvaloniaViewDomain : ViewDomain, IAvaloniaViewDomain
 
     public override bool OpenReportDialog(object model, object? reportLayout = null, IPage? ownerPage = null)
     {
-        // The report subsystem's UI (MimeTypeReportPageWindow/ReportParameterList) hasn't been
-        // ported yet - see the porting plan's later-phase scope. The underlying
-        // MimeTypeReportPage/ReportPage view-model classes in Kapok.View core are already fully
-        // portable (they route everything through ViewDomain), so this only needs new Avalonia
-        // XAML once that phase starts.
-        throw new NotSupportedException(
-            "Report dialogs are not yet supported by Kapok.View.Avalonia; the report window XAML has not been built yet.");
+        if (model is not Kapok.Report.Model.Report reportModel)
+            throw new ArgumentException(
+                $"The parameter {nameof(model)} must be assignable to the type {typeof(Kapok.Report.Model.Report).FullName}.");
+
+        var page = new Report.MimeTypeReportPage(
+            reportModel,
+            ServiceProvider,
+            reportLayout as Kapok.Report.DataModel.ReportLayout);
+
+        var result = ownerPage == null ? page.ShowDialog() : page.ShowDialog(ownerPage);
+        return result ?? false;
     }
 
     public override void OpenFile(string filename)

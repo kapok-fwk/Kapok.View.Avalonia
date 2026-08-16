@@ -27,8 +27,16 @@ public class TaskLists : ListPage<TaskList>
                 var filterSet = (IFilterSet<Task>)filter;
                 filterSet.AddPropertyFilter(nameof(Task.TaskListId), taskList.Id);
             });
+
+        // Real usage for Phase 5's Report/ item: opens a genuine MimeTypeReportPageWindow via
+        // ViewDomain.OpenReportDialog, backed by a real registered report model + processor (see
+        // Report/TaskListsReport.cs, Report/TaskListsReportProcessor.cs).
+        ReportAction = new UIAction("Report", () => ViewDomain.OpenReportDialog(new Report.TaskListsReport(), null, this));
     }
 
     [MenuItem, System.ComponentModel.DataAnnotations.Display(Name = "Tasks")]
     public IDataSetSelectionAction<TaskList> OpenTasksAction { get; }
+
+    [MenuItem, System.ComponentModel.DataAnnotations.Display(Name = "Report")]
+    public IAction ReportAction { get; }
 }

@@ -1,5 +1,6 @@
 using Kapok.Data;
 using Kapok.Module;
+using Kapok.Report;
 using Kapok.View;
 using Kapok.View.Avalonia;
 using Kapok.View.Avalonia.Windows;
@@ -17,6 +18,17 @@ public class ToDoModule : ModuleBase
         // data model registration
         DataDomain.RegisterEntity<Task, TaskService>();
         DataDomain.RegisterEntity<TaskList>();
+
+        // Phase 5 Report/ item's real usage: ReportModule registers Kapok.Report's own entities
+        // (ReportModel/ReportLayout/ReportDesign/...) into the same DataDomain - DbContextBase
+        // builds its EF model from DataDomain.DataEntities globally (confirmed by reading it), so
+        // this composes with ToDoModule's own registrations above without any special wiring.
+        // TaskListsReportProcessor is registered explicitly (not left to
+        // DataTableReportProcessor<>'s own generic self-registration) so it - not the
+        // unimplemented generic base (ProcessToDataTable() throws NotImplementedException,
+        // confirmed by reading it) - is what ReportEngine picks for TaskListsReport.
+        ModuleEngine.InitiateModule(typeof(ReportModule));
+        ReportEngine.RegisterProcessor(typeof(Report.TaskListsReportProcessor), typeof(Report.TaskListsReport));
 
         // register default pages for data models
         ViewDomain.RegisterEntityDefaultPage<Task>(typeof(Tasks));

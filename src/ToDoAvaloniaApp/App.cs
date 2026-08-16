@@ -19,6 +19,7 @@ using Kapok.View;
 using Kapok.View.Avalonia;
 using Kapok.View.Avalonia.Controls;
 using Kapok.View.Avalonia.Dock;
+using Kapok.View.Avalonia.Report;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -62,16 +63,33 @@ public class App : Application
                 services.AddSingleton<IViewDomain, AvaloniaDockViewDomain>(serviceProvider =>
                     new AvaloniaDockViewDomain(ShutdownApplication, serviceProvider));
 
-                // Data logic
+                // Data logic - Sqlite over a single open in-memory connection (not the InMemory
+                // provider used through Phase 4) - see ToDoAvaloniaApp.csproj's comment on why
+                // Phase 5's Report entities forced this switch. The connection has to be opened
+                // and kept alive for the app's lifetime: Sqlite's ":memory:" database is deleted
+                // the moment its one connection closes, so this can't just be an options string
+                // handed to UseSqlite() the way a real file path could be.
+                var sqliteConnection = new Microsoft.Data.Sqlite.SqliteConnection("Data Source=:memory:");
+                sqliteConnection.Open();
+
                 services.AddSingleton<IDataDomain>(serviceProvider =>
                 {
                     var optionsBuilder = new DbContextOptionsBuilder();
-                    optionsBuilder.UseInMemoryDatabase("ToDos");
+                    optionsBuilder.UseSqlite(sqliteConnection);
 
-                    return new EFCoreDataDomain(optionsBuilder.Options)
+                    var dataDomain = new EFCoreDataDomain(optionsBuilder.Options)
                     {
                         ServiceProvider = serviceProvider
                     };
+
+                    // Sqlite is a real relational engine (unlike the InMemory provider), so its
+                    // schema has to actually be created - EnsureCreated() builds it straight from
+                    // the current model rather than requiring real EF migrations, appropriate for
+                    // a throwaway in-memory sample database.
+                    using var dbContext = dataDomain.ConstructNewDbContext();
+                    dbContext.Database.EnsureCreated();
+
+                    return dataDomain;
                 });
                 services.TryAdd(ServiceDescriptor.Scoped<IDataDomainScope>(p =>
                     new EFCoreDataDomainScope(p.GetRequiredService<IDataDomain>(), p)));
@@ -282,6 +300,110 @@ public class App : Application
 
             var taskCard = lastOpenedWindow.DataContext as TaskCard;
             Console.WriteLine($"KAPOK_HEADLESS_SCREENSHOT_DROP_FILE: Task.Description={taskCard?.DataSet?.Current?.Description}");
+        }
+
+        // Phase 5 verification: proves TaskLists.ReportAction really opens a working
+        // MimeTypeReportPageWindow (real mime-type list, real ReportParameterList) and that
+        // SaveAsFileAction genuinely exports data via the registered TaskListsReportProcessor.
+        // ViewDomain.ShowDialogPage blocks the calling thread with its own nested
+        // Dispatcher.UIThread.PushFrame until the dialog closes (see AvaloniaViewDomain's own
+        // comment on this - "keep the UI responsive" is the whole point), so triggering the
+        // action directly here would hang forever with nothing to close it. Posting both the
+        // "open" and "capture, save, save-as-file, close" steps lets the second one run *while*
+        // the first's nested frame is pumping, the same way real queued UI work keeps running
+        // behind an open modal dialog.
+        if (Environment.GetEnvironmentVariable("KAPOK_HEADLESS_SCREENSHOT_REPORT") == "1" &&
+            page is TaskLists taskListsPage)
+        {
+            // Same deferred-commit visibility rule already found in Phase 5 item 1 (TaskCard's
+            // lookup): a seeded-but-unsaved TaskList lives only in this page's own DataSet, not
+            // yet the actual data store, so TaskListsReportProcessor's own separate
+            // IDataDomainScope wouldn't see it without this. Named explicitly (KAPOK_HEADLESS_
+            // SCREENSHOT_SEED alone leaves Name empty) so the exported report has a real,
+            // recognizable value to show, not just a structurally-correct blank row.
+            if (taskListsPage.DataSet?.Current != null)
+                taskListsPage.DataSet.Current.Name = "Groceries";
+            taskListsPage.DataSet?.Save();
+
+            Dispatcher.UIThread.Post(() =>
+            {
+                try
+                {
+                    // Calls ViewDomain.OpenReportDialog directly rather than through
+                    // taskListsPage.ReportAction.Execute() - UIAction.Execute() has its own
+                    // internal try/catch that logs (via NLog, not visible in this console) and
+                    // swallows the exception rather than rethrowing it, which would otherwise
+                    // hide exactly the failure this debug path exists to surface.
+                    GetService<IViewDomain>().OpenReportDialog(new ToDoAvaloniaApp.Report.TaskListsReport(), null, taskListsPage);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"KAPOK_HEADLESS_SCREENSHOT_REPORT: OpenReportDialog threw: {ex}");
+                }
+            });
+            Dispatcher.UIThread.Post(() =>
+            {
+                var reportWindow = lastOpenedWindow;
+                var reportPage = reportWindow?.DataContext as MimeTypeReportPage;
+                Console.WriteLine($"KAPOK_HEADLESS_SCREENSHOT_REPORT: window={reportWindow?.GetType().Name} " +
+                                   $"mimeTypes=[{string.Join(", ", reportPage?.SupportedMimeTypes.Select(m => m.DisplayName) ?? [])}] " +
+                                   $"selected={reportPage?.SelectedMimeType?.DisplayName}");
+
+                var reportScreenshotPath = Environment.GetEnvironmentVariable("KAPOK_HEADLESS_SCREENSHOT") + ".report.png";
+                for (var i = 0; i < 3; i++)
+                {
+                    Dispatcher.UIThread.RunJobs();
+                    AvaloniaHeadlessPlatform.ForceRenderTimerTick();
+                }
+                using (var frame = reportWindow?.CaptureRenderedFrame())
+                {
+                    frame?.Save(reportScreenshotPath);
+                    Console.WriteLine($"KAPOK_HEADLESS_SCREENSHOT_REPORT: saved dialog screenshot to {reportScreenshotPath}");
+                }
+
+                if (Environment.GetEnvironmentVariable("KAPOK_HEADLESS_SCREENSHOT_REPORT_SAVE") == "1")
+                {
+                    // Not SaveAsFileAction: that goes through ViewDomain.OpenSaveFileDialog ->
+                    // IStorageProvider.SaveFilePickerAsync, which never completes in headless mode
+                    // (confirmed the hard way: hung indefinitely, same class of issue as the
+                    // simulated-input problems found earlier in Phase 5) - there's no real file
+                    // picker UI for it to resolve against. ReportEngine.ExecuteReport is the
+                    // actual export logic underneath that dialog; calling it directly against a
+                    // real MemoryStream verifies TaskListsReportProcessor genuinely produces
+                    // report bytes without depending on headless file-picker support.
+                    //
+                    // CSV, not Excel: a first attempt at the Excel mime type got all the way into
+                    // DataTableReportProcessor.FormatDataTableToExcelWorksheet before throwing
+                    // DllNotFoundException for libgdiplus - EPPlus 4.5.3.3's AutoFitColumns() uses
+                    // System.Drawing.Font for text measurement, which needs libgdiplus installed
+                    // on macOS/Linux (not present on this dev Mac, confirmed via the real
+                    // exception, not assumed) - a genuine cross-platform gap in Kapok.Report's
+                    // Excel export path itself, out of scope to fix here (core repo). CSV export
+                    // (ProcessToCsvStream) doesn't touch System.Drawing at all, so it proves the
+                    // rest of the pipeline (ReportEngine, TaskListsReportProcessor,
+                    // ProcessToDataTable) end to end without depending on a system library this
+                    // Mac doesn't have.
+                    using var stream = new MemoryStream();
+                    new global::Kapok.Report.ReportEngine(GetService<IDataDomain>()).ExecuteReport(
+                        new ToDoAvaloniaApp.Report.TaskListsReport(),
+                        new Dictionary<string, object> { [nameof(ToDoAvaloniaApp.Report.TaskListsReport.IncludeArchived)] = true },
+                        "text/csv",
+                        stream);
+                    Console.WriteLine($"KAPOK_HEADLESS_SCREENSHOT_REPORT: ExecuteReport produced {stream.Length} bytes:");
+                    Console.WriteLine(System.Text.Encoding.UTF8.GetString(stream.ToArray()));
+                }
+
+                reportWindow?.Close();
+
+                // Program.cs's own end-of-run capture tracks the last-opened window separately
+                // and would try to screenshot this one right after it's closed/disposed above -
+                // this verification path already saved everything it needs (the dialog
+                // screenshot and the exported bytes), so it exits cleanly here instead of letting
+                // control return to a capture that can only fail on a disposed window.
+                Console.WriteLine("KAPOK_HEADLESS_SCREENSHOT_REPORT: done");
+                Environment.Exit(0);
+            });
+            Dispatcher.UIThread.RunJobs();
         }
 
         base.OnFrameworkInitializationCompleted();

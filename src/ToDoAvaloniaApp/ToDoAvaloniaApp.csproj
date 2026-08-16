@@ -13,7 +13,19 @@
          so it's dropped rather than mixing major versions; it's a dev-only inspector overlay,
          not needed for Phase 1. Revisit once a 12.x build is published. -->
     <PackageReference Include="Microsoft.EntityFrameworkCore" Version="8.0.10" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="8.0.10" />
+    <!-- Phase 5's Report/ item: Kapok.Report.DataModel entities (ReportModel/ReportLayout/...,
+         registered via ReportModule) use [AutoGenerateValue(CreatedDateTime)], which
+         DbContextBase.OnModelCreating unconditionally maps to HasDefaultValueSql(...) - a SQL
+         function string it only knows how to produce for Sqlite/PostgreSQL/SqlServer (confirmed
+         by reading DbContextBase.SqlFunctionCurrentDateTimeUtc). The EF Core InMemory provider
+         this project used through Phase 4 doesn't support HasDefaultValueSql at all, so adding
+         Report entities to the same DbContext threw NotSupportedException at model-build time -
+         confirmed the hard way, not assumed. Switched to Sqlite in an in-memory, open-connection
+         database (App.cs) - genuinely supported by DbContextBase, and just as "no real database
+         file" as InMemory was. Kapok.Data.EntityFrameworkCore's own DbContextBase is core
+         framework code, out of scope to change here even if InMemory support for this attribute
+         would be the more general fix. -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="8.0.10" />
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.1" />
     <!-- Verification-only: lets `dotnet run` render and screenshot the app without a real
          display/compositor (see Program.cs's KAPOK_HEADLESS_SCREENSHOT check) - this dev
@@ -26,7 +38,8 @@
   <ItemGroup>
     <ProjectReference Include="..\Kapok.View.Avalonia\Kapok.View.Avalonia.csproj" />
     <ProjectReference Include="..\Kapok.View.Avalonia.Dock\Kapok.View.Avalonia.Dock.csproj" />
-    <ProjectReference Include="..\..\..\kapok-fwk\src\Kapok.Data.EntityFrameworkCore\Kapok.Data.EntityFrameworkCore.csproj" />
+    <!-- SetTargetFramework: see Kapok.View.Avalonia.csproj's comment on the same fix. -->
+    <ProjectReference Include="..\..\..\kapok-fwk\src\Kapok.Data.EntityFrameworkCore\Kapok.Data.EntityFrameworkCore.csproj" SetTargetFramework="TargetFramework=net8.0" />
   </ItemGroup>
 
 </Project>
