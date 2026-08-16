@@ -41,6 +41,19 @@
          Excel-style clipboard copy, and cell/row edit lifecycle hooks are all already native here -
          see the porting plan's Phase 4 audit table for the full mapping. -->
     <PackageReference Include="Avalonia.Controls.DataGrid" Version="12.1.1" />
+    <!-- Phase 5: needed for PopupThumbResizeBehavior/UIElementDropBehavior - Avalonia's own
+         equivalent of Microsoft.Xaml.Behaviors (the package WPF's Behavior<T> classes came from).
+         Same Phase-2-Ribbon-shaped trap: the original package ID (`Avalonia.Xaml.Interactivity`,
+         last published 11.3.0.6) *restores and compiles* fine here, but throws
+         System.TypeLoadException ("ResourcesChangedEventArgs ... due to value type mismatch") the
+         moment a behavior is actually attached at runtime - confirmed by actually running it, not
+         just building. Its author (wieslawsoltes/Xaml.Behaviors) republished the same
+         `Avalonia.Xaml.Interactivity.Behavior<T>`/`Interaction` API under a new package ID,
+         `Xaml.Behaviors.Interactivity`, for the Avalonia 12.x line (12.0.5 depends on Avalonia
+         12.0.5) - confirmed via a real headless run to actually attach/detach/fire behaviors
+         without error against 12.1.1. Same `Avalonia.Xaml.Interactivity` namespace, so no code
+         changes were needed beyond this package reference. -->
+    <PackageReference Include="Xaml.Behaviors.Interactivity" Version="12.0.5" />
   </ItemGroup>
 
   <ItemGroup>

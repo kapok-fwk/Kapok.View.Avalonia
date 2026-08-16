@@ -7,10 +7,13 @@ using Avalonia.Controls.Primitives;
 using Avalonia.Controls.Templates;
 using Avalonia.Data;
 using Avalonia.Input;
+using Avalonia.Layout;
 using Avalonia.Markup.Xaml.Styling;
 using Avalonia.Media;
 using Avalonia.VisualTree;
+using Avalonia.Xaml.Interactivity;
 using Kapok.Entity;
+using Kapok.View.Avalonia.Behavior;
 
 namespace Kapok.View.Avalonia.Controls;
 
@@ -99,15 +102,55 @@ public class LookupComboBox : CustomComboBox
         dataGrid.AutoGeneratingColumn += DropDownDataGrid_AutoGeneratingColumn;
         dataGrid.PointerReleased += DropDownDataGrid_PointerReleased;
 
+        var contentGrid = new Grid();
+        contentGrid.Children.Add(dataGrid);
+        foreach (var thumb in BuildResizeThumbs())
+            contentGrid.Children.Add(thumb);
+
         popup.Child = new Border
         {
+            MinWidth = 120,
+            MinHeight = 60,
             Background = new SolidColorBrush(Color.FromArgb(255, 252, 252, 252)),
             BorderBrush = Brushes.Gray,
             BorderThickness = new Thickness(1),
-            Child = dataGrid
+            Child = contentGrid
         };
 
         DropDownDataGrid = dataGrid;
+    }
+
+    /// <summary>
+    /// Three thin, invisible-until-hovered resize handles overlaid on the dropdown's edges/corner
+    /// - direct port of WPF's DataGridStyling.xaml column-filter-popup layout (right edge =
+    /// horizontal-only, bottom edge = vertical-only, corner = both), reused here since
+    /// LookupComboBox's dropdown is this port's first real Popup with resizable content.
+    /// </summary>
+    private static IEnumerable<Thumb> BuildResizeThumbs()
+    {
+        Thumb MakeThumb(PopupResizeDirection direction, StandardCursorType cursor,
+            HorizontalAlignment horizontalAlignment, VerticalAlignment verticalAlignment,
+            double? width = null, double? height = null)
+        {
+            var thumb = new Thumb
+            {
+                Background = Brushes.Transparent,
+                Cursor = new Cursor(cursor),
+                HorizontalAlignment = horizontalAlignment,
+                VerticalAlignment = verticalAlignment,
+                Width = width ?? double.NaN,
+                Height = height ?? double.NaN
+            };
+            Interaction.GetBehaviors(thumb).Add(new PopupThumbResizeBehavior { Direction = direction });
+            return thumb;
+        }
+
+        yield return MakeThumb(PopupResizeDirection.Horizontal, StandardCursorType.SizeWestEast,
+            HorizontalAlignment.Right, VerticalAlignment.Stretch, width: 4);
+        yield return MakeThumb(PopupResizeDirection.Vertical, StandardCursorType.SizeNorthSouth,
+            HorizontalAlignment.Stretch, VerticalAlignment.Bottom, height: 4);
+        yield return MakeThumb(PopupResizeDirection.Both, StandardCursorType.SizeAll,
+            HorizontalAlignment.Right, VerticalAlignment.Bottom, width: 10, height: 10);
     }
 
     private void DropDownDataGrid_PointerReleased(object? sender, PointerReleasedEventArgs e)

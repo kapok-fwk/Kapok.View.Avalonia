@@ -3,6 +3,8 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Controls.Primitives;
+using Avalonia.Headless;
+using Avalonia.Input;
 using Avalonia.Markup.Xaml.Styling;
 using Avalonia.Themes.Fluent;
 using Avalonia.Threading;
@@ -176,6 +178,39 @@ public class App : Application
                 .OfType<LookupComboBox>().FirstOrDefault();
             if (lookupComboBox != null)
                 lookupComboBox.IsDropDownOpen = true;
+
+            // Phase 5 verification: proves PopupThumbResizeBehavior actually resizes the
+            // dropdown, not just that it attaches without throwing. Raises the corner resize
+            // Thumb's real DragDeltaEvent directly - a real mouse-drag simulated via
+            // Avalonia.Headless's MouseDown/MouseMove/MouseUp was tried first and confirmed
+            // unreliable here: the click routed to the DataGrid underneath (a 10x10 target in a
+            // 120x66 popup) and closed the dropdown instead of hitting the Thumb, a
+            // headless-hit-testing-precision problem, not a PopupThumbResizeBehavior bug -
+            // Thumb.DragDelta is the actual event the behavior listens to either way, so raising
+            // it directly still verifies the same code a real drag would drive, just without
+            // depending on headless pointer-hit-testing landing on a tiny target.
+            if (Environment.GetEnvironmentVariable("KAPOK_HEADLESS_SCREENSHOT_RESIZE_LOOKUP") == "1")
+            {
+                Dispatcher.UIThread.RunJobs();
+
+                var grid = lastOpenedWindow!.GetVisualDescendants().OfType<DataGrid>()
+                    .FirstOrDefault()?.GetVisualParent() as Grid;
+                var border = grid?.GetVisualParent() as Border;
+                var thumb = grid?.GetVisualChildren().OfType<Thumb>()
+                    .FirstOrDefault(t => t.Cursor?.ToString()?.Contains("SizeAll") == true);
+
+                if (border != null && thumb != null)
+                {
+                    var sizeBefore = (double.IsNaN(border.Width) ? border.Bounds.Width : border.Width,
+                        double.IsNaN(border.Height) ? border.Bounds.Height : border.Height);
+                    thumb.RaiseEvent(new VectorEventArgs { RoutedEvent = Thumb.DragDeltaEvent, Vector = new Vector(60, 40) });
+                    Console.WriteLine($"KAPOK_HEADLESS_SCREENSHOT_RESIZE_LOOKUP: popup size before={sizeBefore} after=({border.Width},{border.Height})");
+                }
+                else
+                {
+                    Console.WriteLine("KAPOK_HEADLESS_SCREENSHOT_RESIZE_LOOKUP: corner thumb or popup border not found");
+                }
+            }
         }
 
         base.OnFrameworkInitializationCompleted();
