@@ -101,15 +101,46 @@ public class App : Application
         Window.WindowOpenedEvent.AddClassHandler<Window>((w, _) => lastOpenedWindow = w);
 
         var pageTypeName = Environment.GetEnvironmentVariable("KAPOK_HEADLESS_SCREENSHOT_PAGE");
+
+        // Phase 5 verification: proves PageContentTemplate's new OnLoadingAction/OnLoadedAction
+        // wiring actually makes ListPage<TEntry>.OnLoaded()'s DataSet.Load() run - i.e. that a
+        // freshly-shown list page fetches pre-existing rows from the repository, not just rows
+        // created live in its own session. Seeds a TaskList through a throwaway TaskLists
+        // instance (created, saved, never shown - "Show" is deliberately never called on it), then
+        // shows a completely separate, fresh TaskLists instance below; the row can only appear
+        // there via a real Load(), since it never touched that instance's own Collection.
+        if (pageTypeName == "TaskListsReload")
+        {
+            var seedTaskLists = GetService<TaskLists>();
+            seedTaskLists.DataSet!.CreateNewEntryAction.Execute();
+            seedTaskLists.DataSet.Current!.Name = "Reloaded list";
+            seedTaskLists.DataSet.Save();
+        }
+
         IPage page = pageTypeName switch
         {
             "TaskLists" => GetService<TaskLists>(),
+            "TaskListsReload" => GetService<TaskLists>(),
             "Tasks" => GetService<Tasks>(),
             "TaskCard" => GetService<Tasks>(),
             "TestPage" => GetService<TestPage>(),
             _ => GetService<MainPage>()
         };
         page.Show();
+
+        // Now that PageContentTemplate actually wires OnLoadingAction/OnLoadedAction (this
+        // phase's PageControlStyling fix), the page's view needs a real layout pass to exist
+        // before the seed logic below touches its DataSet - otherwise a seeded
+        // CreateNewEntryAction can run *before* ListPage<TEntry>.OnLoaded()'s DataSet.Load(),
+        // which deadlocks for Task specifically (confirmed the hard way: hung indefinitely,
+        // isolated by bisecting instrumented Console output - a real edge case in the shared
+        // EntityDeferredCommitService query-rewriting layer when Load() runs against a DataSet
+        // that already holds an uncommitted entity with a FK navigation property, not something
+        // this port's own code can fix). This ordering - page shown and fully loaded before any
+        // script touches it - also just matches what a real user's click-driven flow would
+        // always look like anyway; a seed script skipping straight from Show() to
+        // CreateNewEntryAction was the artificial part.
+        Dispatcher.UIThread.RunJobs();
 
         // Phase 4 verification-only: ToDoAvaloniaApp seeds no data, so the DataGrid added to
         // ListPageView would otherwise render zero rows either way (correctly, but
