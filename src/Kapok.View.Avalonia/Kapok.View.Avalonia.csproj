@@ -36,6 +36,11 @@
          assembly names as the original, so no code besides this package swap was needed. -->
     <PackageReference Include="AvaloniaControls.Ribbon.Flowery" Version="2026.8.13" />
     <PackageReference Include="AvaloniaControls.Ribbon.Desktop.Flowery" Version="2026.8.13" />
+    <!-- Phase 4: confirmed via reflection against the real installed package (not assumed from
+         the WPF feature list) that column sort/resize/reorder, multi-select SelectedItems,
+         Excel-style clipboard copy, and cell/row edit lifecycle hooks are all already native here -
+         see the porting plan's Phase 4 audit table for the full mapping. -->
+    <PackageReference Include="Avalonia.Controls.DataGrid" Version="12.1.1" />
   </ItemGroup>
 
   <ItemGroup>

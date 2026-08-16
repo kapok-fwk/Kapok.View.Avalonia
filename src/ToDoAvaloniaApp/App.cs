@@ -90,6 +90,18 @@ public class App : Application
         };
         page.Show();
 
+        // Phase 4 verification-only: ToDoAvaloniaApp seeds no data, so the DataGrid added to
+        // ListPageView would otherwise render zero rows either way (correctly, but
+        // unconvincingly). Creating one real entry through the normal CreateNewEntryAction
+        // pipeline - not injecting a fake row directly - proves ItemsSource actually renders
+        // real, live DataSet.Collection content. In-memory only, gated behind an env var, so it
+        // never runs during a normal `dotnet run`.
+        if (Environment.GetEnvironmentVariable("KAPOK_HEADLESS_SCREENSHOT_SEED") == "1" &&
+            page is IDataPage { DataSet: { } dataSet })
+        {
+            dataSet.CreateNewEntryAction.Execute();
+        }
+
         base.OnFrameworkInitializationCompleted();
     }
 
