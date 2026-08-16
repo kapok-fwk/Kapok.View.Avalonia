@@ -230,6 +230,32 @@ public class App : Application
             if (lookupComboBox != null)
                 lookupComboBox.IsDropDownOpen = true;
 
+            for (var i = 0; i < 5; i++)
+            {
+                Dispatcher.UIThread.RunJobs();
+                AvaloniaHeadlessPlatform.ForceRenderTimerTick();
+            }
+
+            // Phase 6 finding, not yet resolved: itemsCount confirms the dropdown DataGrid's
+            // ItemsSource genuinely has the seeded "Groceries" TaskList (LookupComboBox itself
+            // works), but columns/rows stay at 0 - AutoGeneratingColumn never fires here, even
+            // though the structurally-identical ListPageView DataGrid (not popup-hosted) generates
+            // columns correctly from the exact same AutoGenerateColumns=true mechanism elsewhere in
+            // this same headless run. Tried and ruled out: more RunJobs()/render-tick passes (up to
+            // 30), an explicit low DispatcherPriority, and setting ItemsSource via a direct
+            // property assignment instead of Bind() - none changed the result. The one variable
+            // that differs from the working ListPageView case is that this DataGrid is Popup.Child,
+            // opened only via the KAPOK_HEADLESS_SCREENSHOT_OPEN_LOOKUP-only
+            // EnablePopupOverlayLayer reflection hack a few lines up (real desktop backends never
+            // take this path - see that hack's own comment) - so this is most likely another
+            // symptom of the same headless-only limitation, not a LookupComboBox defect, but that
+            // can't be conclusively confirmed without a real display to compare against (this dev
+            // Mac's display sleeps when unattended - see the porting plan's Handoff). Left as an
+            // open, honestly-documented gap rather than a claimed fix; see the plan file.
+            var lookupGrid = lastOpenedWindow?.GetVisualDescendants().OfType<DataGrid>().FirstOrDefault();
+            Console.WriteLine($"KAPOK_HEADLESS_SCREENSHOT_OPEN_LOOKUP: itemsCount={lookupComboBox?.ItemsSource?.Cast<object>().Count()} " +
+                               $"columns={lookupGrid?.Columns.Count} rows={lookupGrid?.GetVisualDescendants().OfType<DataGridRow>().Count()}");
+
             // Phase 5 verification: proves PopupThumbResizeBehavior actually resizes the
             // dropdown, not just that it attaches without throwing. Raises the corner resize
             // Thumb's real DragDeltaEvent directly - a real mouse-drag simulated via
