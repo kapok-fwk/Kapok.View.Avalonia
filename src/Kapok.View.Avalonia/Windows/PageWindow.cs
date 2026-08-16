@@ -40,9 +40,6 @@ public class PageWindow : RibbonWindow
             Source = new Uri("avares://AvaloniaUI.Ribbon.Desktop/Styles/Fluent/AvaloniaRibbon.axaml")
         });
 
-        var content = new ContentControl { ContentTemplate = new PageContentTemplate() };
-        content.Bind(ContentControl.ContentProperty, new Binding());
-
         var okButton = new Button
         {
             Content = "OK",
@@ -60,7 +57,7 @@ public class PageWindow : RibbonWindow
             Children =
             {
                 new Grid { Height = 33, [DockPanel.DockProperty] = Dock.Bottom, Children = { okButton } },
-                content
+                BuildPageContentArea()
             }
         };
 
@@ -68,6 +65,19 @@ public class PageWindow : RibbonWindow
         this.Bind(InteractiveMenu.SelectedItemsBindingProperty, new Binding("DataSet.SelectedEntries"));
 
         DataContextChanged += (_, _) => OnDataContextSet();
+    }
+
+    /// <summary>
+    /// Builds the main content area between the Ribbon and the OK button. Overridden by
+    /// Kapok.View.Avalonia.Dock's DockPageWindow to host a Dock.Avalonia DockControl instead of
+    /// a plain ContentControl - kept virtual specifically so that subclass can reuse all of this
+    /// class's Ribbon/KeyBindings/OK-button wiring rather than duplicating it.
+    /// </summary>
+    protected virtual Control BuildPageContentArea()
+    {
+        var content = new ContentControl { ContentTemplate = new PageContentTemplate() };
+        content.Bind(ContentControl.ContentProperty, new Binding());
+        return content;
     }
 
     private bool _keyBindingsAdded;

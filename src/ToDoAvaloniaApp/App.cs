@@ -9,6 +9,7 @@ using Kapok.Data.EntityFrameworkCore;
 using Kapok.Module;
 using Kapok.View;
 using Kapok.View.Avalonia;
+using Kapok.View.Avalonia.Dock;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -45,9 +46,12 @@ public class App : Application
             .UseDefaultServiceProvider((_, options) => { options.ValidateOnBuild = true; })
             .ConfigureServices((_, services) =>
             {
-                // View logic
-                services.AddSingleton<IViewDomain, AvaloniaViewDomain>(serviceProvider =>
-                    new AvaloniaViewDomain(ShutdownApplication, serviceProvider));
+                // View logic - AvaloniaDockViewDomain (Phase 3) gives card/list pages a
+                // Dock.Avalonia-hosted window instead of AvaloniaViewDomain's plain ContentControl
+                // one; it's a strict superset (same Ribbon/KeyBindings wiring, see DockPageWindow),
+                // so this is the only ViewDomain ToDoAvaloniaApp needs going forward.
+                services.AddSingleton<IViewDomain, AvaloniaDockViewDomain>(serviceProvider =>
+                    new AvaloniaDockViewDomain(ShutdownApplication, serviceProvider));
 
                 // Data logic
                 services.AddSingleton<IDataDomain>(serviceProvider =>

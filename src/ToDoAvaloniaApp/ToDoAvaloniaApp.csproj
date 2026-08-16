@@ -25,6 +25,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Kapok.View.Avalonia\Kapok.View.Avalonia.csproj" />
+    <ProjectReference Include="..\Kapok.View.Avalonia.Dock\Kapok.View.Avalonia.Dock.csproj" />
     <ProjectReference Include="..\..\..\kapok-fwk\src\Kapok.Data.EntityFrameworkCore\Kapok.Data.EntityFrameworkCore.csproj" />
   </ItemGroup>
 
