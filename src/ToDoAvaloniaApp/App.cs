@@ -1,14 +1,19 @@
+using System.Reflection;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
+using Avalonia.Controls.Primitives;
 using Avalonia.Markup.Xaml.Styling;
 using Avalonia.Themes.Fluent;
+using Avalonia.Threading;
+using Avalonia.VisualTree;
 using Kapok.BusinessLayer;
 using Kapok.Data;
 using Kapok.Data.EntityFrameworkCore;
 using Kapok.Module;
 using Kapok.View;
 using Kapok.View.Avalonia;
+using Kapok.View.Avalonia.Controls;
 using Kapok.View.Avalonia.Dock;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -80,11 +85,23 @@ public class App : Application
         // menu is currently empty by design (its actions target a separate "Main" menu meant for
         // a navigation-bar surface that doesn't exist until Phase 3's DocumentPageCollectionPage
         // lands, see MainPage.cs), so it alone can't prove the Ribbon renders real buttons.
+        // "TaskCard" (Phase 5) shows Tasks like "Tasks" does - TaskCard itself isn't a
+        // directly-showable top-level page (CardPage<TEntry> requires an IDataSetView<TEntry>
+        // constructor argument DI can't resolve on its own), it's opened automatically by
+        // Tasks.OpenCardPageAction when the seed logic below creates a new Task, same real path
+        // a user would take.
+        // Tracks the last window opened (Tasks, then TaskCard once seeded below) - matches
+        // Program.cs's own WindowOpenedEvent class-handler technique and its comment on why
+        // ApplicationLifetime.Windows isn't safe to read at this point in startup.
+        Window? lastOpenedWindow = null;
+        Window.WindowOpenedEvent.AddClassHandler<Window>((w, _) => lastOpenedWindow = w);
+
         var pageTypeName = Environment.GetEnvironmentVariable("KAPOK_HEADLESS_SCREENSHOT_PAGE");
         IPage page = pageTypeName switch
         {
             "TaskLists" => GetService<TaskLists>(),
             "Tasks" => GetService<Tasks>(),
+            "TaskCard" => GetService<Tasks>(),
             "TestPage" => GetService<TestPage>(),
             _ => GetService<MainPage>()
         };
@@ -99,7 +116,66 @@ public class App : Application
         if (Environment.GetEnvironmentVariable("KAPOK_HEADLESS_SCREENSHOT_SEED") == "1" &&
             page is IDataPage { DataSet: { } dataSet })
         {
-            dataSet.CreateNewEntryAction.Execute();
+            // Phase 5 verification: TaskCard's LookupComboBox needs a real TaskList to show in
+            // its dropdown grid. Seeded through TaskLists' own real DataSet/business-layer
+            // pipeline (CreateNewEntryAction, then Save so it's visible to the *separate*
+            // IDataDomainScope TaskCard's LookupDefinition queries through - see
+            // AvaloniaPropertyLookupView.Refresh), not injected directly.
+            if (pageTypeName == "TaskCard")
+            {
+                var taskListsDataSet = GetService<TaskLists>().DataSet!;
+                taskListsDataSet.CreateNewEntryAction.Execute();
+                taskListsDataSet.Current!.Name = "Groceries";
+                taskListsDataSet.Save();
+
+                // The page-level CreateNewEntryAction (ListPage<TEntry>.CreateNewEntry(), not
+                // the DataSet's own one used below for the other pages) is what actually checks
+                // and triggers OpenCardPageAction - calling dataSet.CreateNewEntryAction directly
+                // would create the Task but skip opening TaskCard entirely.
+                ((IDataPage)page).CreateNewEntryAction.Execute();
+            }
+            else
+            {
+                dataSet.CreateNewEntryAction.Execute();
+            }
+        }
+
+        // Phase 5 verification: proves LookupComboBox's dropdown DataGrid actually renders real
+        // lookup rows, not just that the (closed) combo box exists. Opens the dropdown on
+        // whichever LookupComboBox is in the just-shown window's visual tree, after the seed
+        // block above has already created and opened the TaskCard dialog. At this point in
+        // startup nothing has laid out yet (Window.Show() doesn't synchronously build the page's
+        // control tree), so TaskCardView's AttachedToVisualTree handler - which is what actually
+        // assigns LookupComboBox.ItemsSource - hasn't run yet either. RunJobs() here forces that
+        // layout/template pass to happen now instead of waiting for Program.cs's own capture
+        // loop, so the control can actually be found and opened before that loop takes over.
+        if (Environment.GetEnvironmentVariable("KAPOK_HEADLESS_SCREENSHOT_OPEN_LOOKUP") == "1")
+        {
+            Dispatcher.UIThread.RunJobs();
+
+            // Confirmed the hard way (a real headless run, not a guess): opening a Popup inside
+            // a RibbonWindow throws "Unable to create IPopupImpl and no overlay layer is found
+            // for the target control". AvaloniaControls.Ribbon.Desktop.Flowery's own Window
+            // template has no VisualLayerManager with popup-overlay routing enabled the way a
+            // stock Avalonia Window's built-in template does - and PageWindow.cs's own
+            // VisualLayerManager wrapper (added for exactly this) can only fix general overlays
+            // (EnableOverlayLayer is public); VisualLayerManager.EnablePopupOverlayLayer is
+            // internal to Avalonia.Controls, unreachable from Kapok.View.Avalonia. On a real
+            // desktop backend this never triggers at all - real platforms always support a true
+            // native popup window, so Popup never needs the overlay-layer path there; this is a
+            // headless-testing-only gap. Flipping the internal flag via reflection here (not in
+            // production code) is the only way to actually see the popup's real rendered pixels
+            // in a headless screenshot rather than just trusting the control never crashes.
+            var visualLayerManager = lastOpenedWindow?.GetVisualDescendants()
+                .OfType<VisualLayerManager>().FirstOrDefault();
+            typeof(VisualLayerManager)
+                .GetProperty("EnablePopupOverlayLayer", BindingFlags.NonPublic | BindingFlags.Instance)!
+                .SetValue(visualLayerManager, true);
+
+            var lookupComboBox = lastOpenedWindow?.GetVisualDescendants()
+                .OfType<LookupComboBox>().FirstOrDefault();
+            if (lookupComboBox != null)
+                lookupComboBox.IsDropDownOpen = true;
         }
 
         base.OnFrameworkInitializationCompleted();

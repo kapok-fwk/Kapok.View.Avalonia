@@ -1,4 +1,5 @@
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Data;
 using Avalonia.Input;
 using Avalonia.Layout;
@@ -51,13 +52,32 @@ public class PageWindow : RibbonWindow
         };
         okButton.Bind(Button.CommandProperty, new Binding($"{nameof(IPage.CloseAction)}") { Converter = new IActionToICommandConverter() });
 
-        Content = new DockPanel
+        // AvaloniaControls.Ribbon.Desktop's RibbonWindow supplies its own Window template
+        // (that's the whole point of it - Ribbon chrome instead of a plain title bar), which
+        // doesn't include the VisualLayerManager/OverlayLayer a stock Avalonia Window's default
+        // template provides. Popups (confirmed via a real headless screenshot: opening a
+        // LookupComboBox's dropdown inside a DockPageWindow threw
+        // "Unable to create IPopupImpl and no overlay layer is found for the target control")
+        // need one somewhere in the visual tree to render into when overlay-mode popups are used
+        // (the default in Avalonia.Headless, and generally preferred over real separate popup
+        // windows) - so this wraps the window's whole content in one explicitly, rather than
+        // leaving every popup-using control (LookupComboBox now, ContextMenu/Flyout/ToolTip
+        // later) to silently fail only inside Ribbon-hosted windows.
+        Content = new VisualLayerManager
         {
-            LastChildFill = true,
-            Children =
+            // EnableOverlayLayer defaults to false (unlike EnableAdornerLayer) - confirmed by
+            // reading VisualLayerManager.cs - so it has to be turned on explicitly, or
+            // OverlayLayer.GetOverlayLayer keeps returning null even once a VisualLayerManager
+            // is actually present in the tree, and popups keep throwing.
+            EnableOverlayLayer = true,
+            Child = new DockPanel
             {
-                new Grid { Height = 33, [DockPanel.DockProperty] = Dock.Bottom, Children = { okButton } },
-                BuildPageContentArea()
+                LastChildFill = true,
+                Children =
+                {
+                    new Grid { Height = 33, [DockPanel.DockProperty] = Dock.Bottom, Children = { okButton } },
+                    BuildPageContentArea()
+                }
             }
         };
 

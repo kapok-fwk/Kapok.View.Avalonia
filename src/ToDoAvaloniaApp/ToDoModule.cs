@@ -28,5 +28,11 @@ public class ToDoModule : ModuleBase
         // did for the WPF version's MainPageWindow. Reuses the generic PageWindow rather than a
         // dedicated MainPageWindow subclass - no custom chrome needed yet in this phase.
         AvaloniaViewDomain.RegisterPageWindowConstructor<MainPage>(() => new PageWindow());
+
+        // TaskCard (Phase 5's real LookupComboBox usage) needs its own hand-built control -
+        // Kapok.View.Avalonia's generic CardPageView is a deliberate "not implemented" placeholder
+        // (see its own doc comment), matching WPF's ICardPage story of every real card page
+        // supplying its own control.
+        AvaloniaViewDomain.RegisterPageControlType<TaskCard>(typeof(TaskCardView));
     }
 }

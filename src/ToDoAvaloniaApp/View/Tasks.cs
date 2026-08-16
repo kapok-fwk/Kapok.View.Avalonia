@@ -28,5 +28,11 @@ public class Tasks : ListPage<Task>
                 new(nameof(Task.DueDate)),
             }
         });
+
+        // Real usage for the Phase 5 LookupComboBox/CustomComboBox port (TaskCard/TaskCardView):
+        // ListPage<TEntry>.CreateNewEntry() auto-opens OpenCardPageAction when set (see
+        // ListPage.cs), so creating a new Task now opens a real TaskCard dialog with a working
+        // TaskListId lookup, rather than TaskCard being reachable only from test code.
+        OpenCardPageAction = new UIOpenReferencedCardPageAction<Task>("OpenCardPage", typeof(TaskCard), ServiceProvider, DataSet);
     }
 }

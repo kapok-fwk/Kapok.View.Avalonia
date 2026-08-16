@@ -36,9 +36,14 @@ internal static class Program
         // lifetime.Windows isn't populated at Setup time in this Avalonia version (only once the
         // lifetime is actually Start()-ed, which we don't want here) - a class handler on
         // Window's own WindowOpenedEvent catches the real window App.OnFrameworkInitializationCompleted
-        // opens via mainPage.Show(), regardless of that wiring.
+        // opens via mainPage.Show(), regardless of that wiring. Tracks the *last* window opened,
+        // not just the first: Phase 5's KAPOK_HEADLESS_SCREENSHOT_PAGE=TaskCard flow shows Tasks
+        // and then triggers CreateNewEntryAction, which opens a second, TaskCard dialog window on
+        // top of it (via Tasks.OpenCardPageAction) - that's the one worth capturing. For every
+        // other page (still just one window ever opened), this behaves identically to the old
+        // first-window-wins logic.
         Window? openedWindow = null;
-        Window.WindowOpenedEvent.AddClassHandler<Window>((w, _) => openedWindow ??= w);
+        Window.WindowOpenedEvent.AddClassHandler<Window>((w, _) => openedWindow = w);
 
         var appBuilder = AppBuilder.Configure<App>()
             .UseSkia()
