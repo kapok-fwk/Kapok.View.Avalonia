@@ -5,6 +5,8 @@ using Avalonia.Controls.Templates;
 using Avalonia.Data;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.Xaml.Interactivity;
+using Kapok.View.Avalonia.Behavior;
 using Kapok.View.Avalonia.Controls;
 using Kapok.View.Avalonia.Data;
 using ToDoAvaloniaApp.DataModel;
@@ -70,6 +72,11 @@ public class TaskCardView : UserControl
         AddRow(0, "Name", nameBox);
         AddRow(1, "Description", descriptionBox);
         AddRow(2, "Task list", _taskListCombo);
+
+        // Phase 5's real UIElementDropBehavior usage - TaskCard implements IDropTargetOnPage
+        // (see TaskCard.cs), so dropping a file anywhere on this card records its name in
+        // Description.
+        Interaction.GetBehaviors(grid).Add(new UIElementDropBehavior());
 
         Content = grid;
 

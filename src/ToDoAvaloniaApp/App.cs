@@ -5,7 +5,9 @@ using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Controls.Primitives;
 using Avalonia.Headless;
 using Avalonia.Input;
+using Avalonia.Input.Raw;
 using Avalonia.Markup.Xaml.Styling;
+using Avalonia.Platform.Storage;
 using Avalonia.Themes.Fluent;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
@@ -211,6 +213,44 @@ public class App : Application
                     Console.WriteLine("KAPOK_HEADLESS_SCREENSHOT_RESIZE_LOOKUP: corner thumb or popup border not found");
                 }
             }
+        }
+
+        // Phase 5 verification: proves UIElementDropBehavior actually forwards a dropped file to
+        // TaskCard.DropFile (via IDropTargetOnPage), not just that DragDrop.SetAllowDrop was
+        // called. Point-based simulation via Avalonia.Headless's TopLevel.DragDrop(point, ...) -
+        // confirmed working for a plain Border in a plain Window in isolation - never reached the
+        // target here, even with a geometrically correct on-screen point; the difference is
+        // DockPageWindow's real Dock.Avalonia DockControl chrome between the window and
+        // TaskCardView, which apparently doesn't route simulated raw input the way it would a
+        // real platform event. Raising the routed DragOver/Drop events directly on the drop
+        // target sidesteps that - same fallback already used for PopupThumbResizeBehavior's
+        // Thumb.DragDelta above, and it's still the exact event UIElementDropBehavior listens to.
+        if (Environment.GetEnvironmentVariable("KAPOK_HEADLESS_SCREENSHOT_DROP_FILE") == "1")
+        {
+            Dispatcher.UIThread.RunJobs();
+
+            // IStorageItem can't be implemented by user code (Avalonia's analyzer rejects it -
+            // confirmed the hard way: CS0535 naming the interface "not implementable by user
+            // code"), so a real temp file + the window's own real StorageProvider is used to get
+            // a genuine IStorageItem instead of a hand-rolled test double.
+            var tempFilePath = Path.Combine(Path.GetTempPath(), "receipt.pdf");
+            File.WriteAllText(tempFilePath, "test");
+            var storageFile = lastOpenedWindow!.StorageProvider.TryGetFileFromPathAsync(new Uri(tempFilePath)).GetAwaiter().GetResult();
+
+            var dataTransfer = new DataTransfer();
+            dataTransfer.Add(DataTransferItem.CreateFile(storageFile!));
+
+            var grid = lastOpenedWindow.GetVisualDescendants().OfType<Grid>()
+                .FirstOrDefault(g => DragDrop.GetAllowDrop(g));
+            if (grid != null)
+            {
+                var dropPoint = grid.TranslatePoint(new Point(grid.Bounds.Width / 2, grid.Bounds.Height / 2), lastOpenedWindow) ?? default;
+                grid.RaiseEvent(new DragEventArgs(DragDrop.DragOverEvent, dataTransfer, grid, dropPoint, KeyModifiers.None));
+                grid.RaiseEvent(new DragEventArgs(DragDrop.DropEvent, dataTransfer, grid, dropPoint, KeyModifiers.None));
+            }
+
+            var taskCard = lastOpenedWindow.DataContext as TaskCard;
+            Console.WriteLine($"KAPOK_HEADLESS_SCREENSHOT_DROP_FILE: Task.Description={taskCard?.DataSet?.Current?.Description}");
         }
 
         base.OnFrameworkInitializationCompleted();
