@@ -1,0 +1,94 @@
+# This workflow uses actions that are not certified by GitHub.
+# They are provided by a third-party and are governed by
+# separate terms of service, privacy policy, and support
+# documentation.
+
+name: .NET Avalonia Desktop
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+
+  build:
+
+    strategy:
+      matrix:
+        configuration: [Debug, Release]
+        include:
+          - configuration: Release
+            is_release: true
+
+    # Unlike Kapok.View.Wpf (Windows-only, needs microsoft/setup-msbuild + MSBuild.exe for its
+    # WPF-specific restore target), this port is plain SDK-style/dotnet-CLI throughout and
+    # doesn't depend on any Windows-only tooling - ubuntu-latest is faster/cheaper and, given this
+    # project's whole point is proving Kapok.View works outside Windows, a more meaningful signal
+    # than building on Windows would be.
+    runs-on: ubuntu-latest
+
+    env:
+      Solution_Name: Kapok.View.Avalonia.sln
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: 8.0.x
+
+    # Kapok.Acl/Kapok.Core/Kapok.Report/Kapok.View/Kapok.Data.EntityFrameworkCore are consumed as
+    # published packages from the kapok-fwk feed (matching Kapok.View.Wpf), not as local
+    # ProjectReferences into a sibling kapok-fwk checkout - a CI runner only checks out this one
+    # repo, so there's nothing else to build kapok-fwk from here.
+    - name: Add Kapok package source
+      run: dotnet nuget add source --username leo-schick --password ${{ secrets.GITHUB_TOKEN }} --store-password-in-clear-text --name kapok-fwk "https://nuget.pkg.github.com/kapok-fwk/index.json"
+
+    - name: Restore dependencies
+      run: dotnet restore $Solution_Name
+
+    # Execute all unit tests in the solution
+    - name: Execute unit tests
+      run: dotnet test $Solution_Name --no-restore
+
+    - name: Build solution and generate NuGet package
+      run: |
+        dotnet build $Solution_Name --no-restore -c ${{ matrix.configuration }}
+        dotnet pack $Solution_Name --no-build -c ${{ matrix.configuration }} -o out
+        rm -f ./out/ToDoAvaloniaApp.*.nupkg
+      if: ${{ matrix.is_release }}
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: NuGet Packages
+        path: ./out/*.nupkg
+      if: ${{ matrix.is_release }}
+
+  publish:
+    needs: build
+
+    if: github.event_name != 'pull_request'
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Add Kapok package source
+      run: dotnet nuget add source --username leo-schick --password ${{ secrets.GITHUB_TOKEN }} --store-password-in-clear-text --name kapok-fwk "https://nuget.pkg.github.com/kapok-fwk/index.json"
+
+    - uses: actions/download-artifact@v4
+      with:
+        name: NuGet Packages
+        path: ~/download/nuget_packages/
+
+    - name: Push generated package to GitHub registry
+      run: |
+        for pkg in ~/download/nuget_packages/*.nupkg; do
+          dotnet nuget push "$pkg" --skip-duplicate --source kapok-fwk --api-key ${{ secrets.KAPOK_FWK_GITHUB_TOKEN }}
+        done

@@ -38,8 +38,12 @@
   <ItemGroup>
     <ProjectReference Include="..\Kapok.View.Avalonia\Kapok.View.Avalonia.csproj" />
     <ProjectReference Include="..\Kapok.View.Avalonia.Dock\Kapok.View.Avalonia.Dock.csproj" />
-    <!-- SetTargetFramework: see Kapok.View.Avalonia.csproj's comment on the same fix. -->
-    <ProjectReference Include="..\..\..\kapok-fwk\src\Kapok.Data.EntityFrameworkCore\Kapok.Data.EntityFrameworkCore.csproj" SetTargetFramework="TargetFramework=net8.0" />
+    <!-- Published package, not a local sibling-checkout ProjectReference - see
+         Kapok.View.Avalonia.csproj's comment on the same switch (needed for single-repo CI). -->
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Kapok.Data.EntityFrameworkCore" Version="0.2.0" />
   </ItemGroup>
 
 </Project>

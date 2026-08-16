@@ -66,16 +66,18 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- kapok-fwk's own projects started multi-targeting net6.0/net8.0/net10.0 externally to
-         this port (not a change made here) - without SetTargetFramework, MSBuild's
-         ProjectReference negotiation didn't reliably pick the one TFM this net8.0-only project
-         can actually build against, and failed hard on net10.0 (not installed on this machine).
-         Pinning explicitly to net8.0 is the standard fix for a single-TFM project referencing a
-         multi-targeted one, and doesn't require kapok-fwk itself to change. -->
-    <ProjectReference Include="..\..\..\kapok-fwk\src\Kapok.Acl\Kapok.Acl.csproj" SetTargetFramework="TargetFramework=net8.0" />
-    <ProjectReference Include="..\..\..\kapok-fwk\src\Kapok.Core\Kapok.Core.csproj" SetTargetFramework="TargetFramework=net8.0" />
-    <ProjectReference Include="..\..\..\kapok-fwk\src\Kapok.Report\Kapok.Report.csproj" SetTargetFramework="TargetFramework=net8.0" />
-    <ProjectReference Include="..\..\..\kapok-fwk\src\Kapok.View\Kapok.View.csproj" SetTargetFramework="TargetFramework=net8.0" />
+    <!-- Switched from local ProjectReferences into a sibling kapok-fwk checkout (this port's
+         dev-time setup, needed while actively building against kapok-fwk source that hadn't been
+         released yet) to published packages from the kapok-fwk GitHub Packages feed - matching
+         how Kapok.View.Wpf itself consumes these same four packages (see its own .csproj). A CI
+         runner only checks out this one repo, so a relative "..\..\..\kapok-fwk\..." path has
+         nothing to resolve against; published packages are what makes a single-repo CI build
+         possible, the same reason Kapok.View.Wpf's own workflow adds the kapok-fwk package source
+         before restoring. -->
+    <PackageReference Include="Kapok.Acl" Version="0.2.0" />
+    <PackageReference Include="Kapok.Core" Version="0.2.0" />
+    <PackageReference Include="Kapok.Report" Version="0.2.0" />
+    <PackageReference Include="Kapok.View" Version="0.2.0" />
   </ItemGroup>
 
 </Project>
