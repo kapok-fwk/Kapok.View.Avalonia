@@ -15,14 +15,36 @@
   <ItemGroup>
     <!-- Pinned to the latest stable line (12.1.x) rather than 11.2.x so this lines up with
          Dock for Avalonia's packages (versioned 12.1.0.1, i.e. built against Avalonia 12.1.x),
-         needed starting Phase 3. Known open risk, to verify empirically in Phase 2: the
-         AvaloniaControls.Ribbon.Desktop package declares "Avalonia is greater or equal 11.2.3"
-         and was last published against the 11.x line; its actual compatibility with Avalonia 12
-         is unconfirmed until it's added and built against. -->
+         needed starting Phase 3. -->
     <PackageReference Include="Avalonia" Version="12.1.1" />
     <PackageReference Include="Avalonia.Desktop" Version="12.1.1" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.1" />
     <PackageReference Include="Avalonia.Fonts.Inter" Version="12.1.1" />
+    <!-- Phase 2: the plan's originally flagged risk turned out real, but worse than expected -
+         AvaloniaControls.Ribbon(.Desktop) 0.9.9 (SachiHarshitha/Avalonia.Ribbon, last published
+         against Avalonia 11.x) restores and *compiles* fine against Avalonia 12.1.1, but
+         RibbonWindow's constructor throws System.MissingMethodException at runtime
+         (Window.set_ExtendClientAreaChromeHints was removed from Avalonia's own Window class
+         between 11.x and 12.x) - confirmed by actually constructing one, not just building.
+         Compile-time restore success doesn't prove runtime binary compatibility for a
+         netstandard2.0 package built against a specific Avalonia version.
+         Fix: tobitege/Avalonia.Ribbon (github.com/tobitege/Avalonia.Ribbon) is an actively
+         maintained fork published as AvaloniaControls.Ribbon.Flowery /
+         .Desktop.Flowery, whose own nuspec declares Avalonia 12.1.0+ and which was confirmed,
+         via a real headless Avalonia app, to construct RibbonWindow/DesktopRibbon without error
+         against 12.1.1. Same AvaloniaUI.Ribbon / AvaloniaUI.Ribbon.Desktop namespaces and
+         assembly names as the original, so no code besides this package swap was needed. -->
+    <PackageReference Include="AvaloniaControls.Ribbon.Flowery" Version="2026.8.13" />
+    <PackageReference Include="AvaloniaControls.Ribbon.Desktop.Flowery" Version="2026.8.13" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Kapok.View.Wpf's icon PNGs (Resources/Icons/*.png), copied in as-is - WPF's pack://
+         URIs can't be resolved from here (they point at Kapok.View.Wpf's own embedded resources,
+         and this module takes no dependency on that assembly), so the assets themselves are
+         duplicated into this module and re-exposed via Avalonia's avares:// scheme instead. See
+         ImageNameToImageSourceConverter.cs. -->
+    <AvaloniaResource Include="Resources\Icons\**" />
   </ItemGroup>
 
   <ItemGroup>

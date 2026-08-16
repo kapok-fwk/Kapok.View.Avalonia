@@ -12,7 +12,6 @@ namespace Kapok.View.Avalonia.ValueConverter;
 public class ActionCommand : ICommand
 {
     private readonly IAction? _action;
-    private readonly object? _typedAction; // IAction<T> boxed, invoked via reflection-free delegates below
     private readonly Func<object?, bool>? _canExecuteTyped;
     private readonly Action<object?>? _executeTyped;
 

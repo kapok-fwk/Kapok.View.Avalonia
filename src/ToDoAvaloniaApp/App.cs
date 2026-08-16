@@ -66,10 +66,25 @@ public class App : Application
 
                 // Views and ViewModels
                 services.AddTransient<MainPage>();
+                services.AddTransient<TaskLists>();
+                services.AddTransient<Tasks>();
+                services.AddTransient<TestPage>();
             }).Build();
 
-        var mainPage = GetService<MainPage>();
-        mainPage.Show();
+        // Verification-only hook (see Program.cs's KAPOK_HEADLESS_SCREENSHOT): lets a headless
+        // screenshot target a page other than MainPage, e.g. "TaskLists" - MainPage's own Base
+        // menu is currently empty by design (its actions target a separate "Main" menu meant for
+        // a navigation-bar surface that doesn't exist until Phase 3's DocumentPageCollectionPage
+        // lands, see MainPage.cs), so it alone can't prove the Ribbon renders real buttons.
+        var pageTypeName = Environment.GetEnvironmentVariable("KAPOK_HEADLESS_SCREENSHOT_PAGE");
+        IPage page = pageTypeName switch
+        {
+            "TaskLists" => GetService<TaskLists>(),
+            "Tasks" => GetService<Tasks>(),
+            "TestPage" => GetService<TestPage>(),
+            _ => GetService<MainPage>()
+        };
+        page.Show();
 
         base.OnFrameworkInitializationCompleted();
     }

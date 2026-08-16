@@ -15,6 +15,12 @@
     <PackageReference Include="Microsoft.EntityFrameworkCore" Version="8.0.10" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="8.0.10" />
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.1" />
+    <!-- Verification-only: lets `dotnet run` render and screenshot the app without a real
+         display/compositor (see Program.cs's KAPOK_HEADLESS_SCREENSHOT check) - this dev
+         environment's display is frequently asleep, which crashes Avalonia.Native's Metal
+         RenderTimer outright, so this is the reliable way to confirm each phase's UI actually
+         renders rather than just compiles. Not referenced by any normal (non-headless) run. -->
+    <PackageReference Include="Avalonia.Headless" Version="12.1.1" />
   </ItemGroup>
 
   <ItemGroup>

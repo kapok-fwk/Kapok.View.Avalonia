@@ -1,6 +1,5 @@
 using System.Collections;
 using Avalonia.Controls;
-using Avalonia.Layout;
 
 namespace Kapok.View.Avalonia.DefaultPageControls;
 
@@ -8,7 +7,13 @@ namespace Kapok.View.Avalonia.DefaultPageControls;
 /// Generic IListPage control. Matches Kapok.View.Wpf's ListPageControl.xaml, minus the real
 /// DataGrid (CustomDataGrid's dynamic-columns-from-metadata/filtering/etc. is its own later
 /// phase, see the porting plan) - a plain ListBox stands in here so the ViewDomain/DataSetView
-/// binding pipeline can be proven end to end without waiting on that.
+/// binding pipeline can be proven end to end without waiting on that. WPF's ListPageControl.xaml
+/// also has its own small toolbar here (sort-ascending/descending, list-view selector, filter
+/// toggle) - those are DataSet-level, grid-specific controls (DataSet.SortAscendingAction etc.),
+/// not the page's Base menu, so they belong with the real DataGrid work later, not this stand-in.
+/// Phase 1/2 note: this used to also embed a MenuToolbar rendering the page's Base menu, before
+/// PageWindow had a real Ribbon to show it - removed once the Ribbon (Windows/PageWindow.cs) took
+/// over that job, so the same actions don't render twice.
 ///
 /// DataSet.Collection is exposed only via the closed generic IDataSetReadonlyView&lt;TEntry&gt;
 /// interface (DataSetView&lt;TEntry&gt; implements it as an explicit interface member on a protected
@@ -24,15 +29,7 @@ public class ListPageView : UserControl
     public ListPageView()
     {
         _listBox = new ListBox();
-
-        Content = new DockPanel
-        {
-            Children =
-            {
-                new MenuToolbar { [DockPanel.DockProperty] = Dock.Top },
-                _listBox
-            }
-        };
+        Content = _listBox;
 
         AttachedToVisualTree += (_, _) => Rebuild();
     }
