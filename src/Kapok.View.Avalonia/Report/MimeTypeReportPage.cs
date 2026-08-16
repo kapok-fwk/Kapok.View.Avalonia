@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using Kapok.Data;
 using Kapok.Report;
 using Kapok.Report.DataModel;
+using Kapok.View.Avalonia.Localization;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Kapok.View.Avalonia.Report;
@@ -23,12 +24,23 @@ namespace Kapok.View.Avalonia.Report;
 /// processor in this port can actually produce - confirmed by reading
 /// DataTableReportProcessor.SupportedMimeTypes, the only IMimeTypeReportProcessor this port
 /// registers (see ToDoAvaloniaApp's TaskListsReportProcessor): Excel 2007+, Excel 97-2003, and
-/// CSV. If a future report processor supports more mime types, add their entries then.
+/// CSV. If a future report processor supports more mime types, add their entries then. The
+/// per-mime-type <see cref="MimeTypeViewModel.DisplayName"/> strings themselves aren't localized -
+/// WPF's own MimeTypeMap-backed captions weren't resx-driven either, only the fixed UI strings
+/// below (error/dialog messages) were.
+///
+/// Those fixed UI strings are looked up via <see cref="ResxManager"/> from a ported
+/// Report/Resources/MimeTypeReportPage.resx (+ Report/Resources/DataTableReportViewModel.resx for
+/// the two messages WPF's own MimeTypeReportPage.cs sources from that file instead) - Phase 5's
+/// Infralution.Localization.Wpf item.
 /// </summary>
 public sealed class MimeTypeReportPage : ReportPage<ReportProcessor<Kapok.Report.Model.Report>, Kapok.Report.Model.Report>
 {
     private MimeTypeViewModel? _selectedMimeType;
     private readonly ReportEngine _reportEngine;
+
+    private const string ResxName = "Kapok.View.Avalonia.Report.Resources.MimeTypeReportPage";
+    private const string DataTableReportViewModelResxName = "Kapok.View.Avalonia.Report.Resources.DataTableReportViewModel";
 
     private const string MimeTypeExcel2007 = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
     private const string MimeTypeExcel2003 = "application/vnd.ms-excel";
@@ -121,7 +133,7 @@ public sealed class MimeTypeReportPage : ReportPage<ReportProcessor<Kapok.Report
     private void Save()
     {
         string? fileName = ViewDomain.OpenSaveFileDialog(
-            "Save report as",
+            ResxManager.GetString(ResxName, "SaveAsFileDialogTitle"),
             $"{SelectedMimeType!.DisplayName} (*{SelectedMimeType.FileExtension})|*{SelectedMimeType.FileExtension}");
         if (fileName == null)
         {
@@ -141,8 +153,8 @@ public sealed class MimeTypeReportPage : ReportPage<ReportProcessor<Kapok.Report
             }
 
             if (ViewDomain.ShowConfirmMessage(
-                    "The report was exported successfully. Do you want to open it now?",
-                    "Export successful",
+                    ResxManager.GetString(DataTableReportViewModelResxName, "SendNotificationOnExportSuccessfulRequestToOpen_Message"),
+                    ResxManager.GetString(DataTableReportViewModelResxName, "SendNotificationOnExportSuccessfulRequestToOpen_Caption"),
                     this))
             {
                 ViewDomain.OpenFile(fileName);
@@ -151,16 +163,16 @@ public sealed class MimeTypeReportPage : ReportPage<ReportProcessor<Kapok.Report
         catch (IOException exception)
         {
             ViewDomain.ShowErrorMessage(
-                "The report could not be saved to the selected file.",
-                "Export failed",
+                ResxManager.GetString(DataTableReportViewModelResxName, "SendNotificationOnIOException_Message"),
+                ResxManager.GetString(DataTableReportViewModelResxName, "SendNotificationOnIOException_Caption"),
                 this,
                 exception);
         }
         catch (Exception exception)
         {
             ViewDomain.ShowErrorMessage(
-                "An error occurred while executing the report.",
-                "Report execution failed",
+                ResxManager.GetString(ResxName, "ErrorExceuteReport_Message"),
+                ResxManager.GetString(ResxName, "ErrorExecuteReport_Title"),
                 this,
                 exception);
         }
@@ -187,8 +199,8 @@ public sealed class MimeTypeReportPage : ReportPage<ReportProcessor<Kapok.Report
         catch (Exception exception)
         {
             ViewDomain.ShowErrorMessage(
-                "An error occurred while opening the report design dialog.",
-                "Report design failed",
+                ResxManager.GetString(ResxName, "ErrorDesignReport_Message"),
+                ResxManager.GetString(ResxName, "ErrorDesignReport_Title"),
                 this,
                 exception);
         }

@@ -12,6 +12,22 @@ internal static class Program
     [STAThread]
     public static void Main(string[] args)
     {
+        // Phase 5's Infralution.Localization.Wpf item: ResxManager (and, for a real app, this
+        // port's own ViewDomain.Culture - see its constructor) both read
+        // CultureInfo.CurrentUICulture, matching WPF's own ResxExtension (which reads it directly
+        // rather than going through ViewDomain at all - confirmed by reading its source). A real
+        // localized deployment gets this from the OS; this lets verification pick it explicitly.
+        // Sets both CurrentUICulture (this thread) and DefaultThreadCurrentUICulture (any thread
+        // spawned after this point) since it's not yet clear which thread the headless dispatcher
+        // loop below actually resolves resources from.
+        var cultureName = Environment.GetEnvironmentVariable("KAPOK_HEADLESS_SCREENSHOT_CULTURE");
+        if (cultureName != null)
+        {
+            var culture = new System.Globalization.CultureInfo(cultureName);
+            System.Globalization.CultureInfo.CurrentUICulture = culture;
+            System.Globalization.CultureInfo.DefaultThreadCurrentUICulture = culture;
+        }
+
         // See ToDoAvaloniaApp.csproj's Avalonia.Headless comment - lets phase verification
         // render and screenshot the real app without a live display/compositor. Set
         // KAPOK_HEADLESS_SCREENSHOT to an output file path to use this instead of a normal run.

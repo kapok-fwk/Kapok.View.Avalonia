@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using Kapok.Report;
+using Kapok.View.Avalonia.Localization;
 
 namespace Kapok.View.Avalonia.Report;
 
@@ -14,12 +15,12 @@ namespace Kapok.View.Avalonia.Report;
 /// never-assigned one (`{ get; set; }`, no constructor assignment) - a latent bug in the WPF
 /// source, not a behavior worth reproducing. The inherited DialogPage.CancelAction is used as-is.
 ///
-/// Uses plain string literals for its two user-facing messages (export-successful / IO-exception)
-/// rather than porting WPF's Report/Resources/DataTableReportViewModel.resx - checked
-/// Kapok.View.Resources.DataPage.resx first since it looked like the natural shared home, but it
-/// turned out to be empty (designer boilerplate only, no actual strings), and this project has no
-/// .resx localization infrastructure of its own yet (that's Phase 5's separate
-/// Infralution.Localization.Wpf item) - not worth standing up just for two messages.
+/// Its two user-facing messages (export-successful / IO-exception) are looked up via
+/// <see cref="ResxManager"/> from a ported Report/Resources/DataTableReportViewModel.resx -
+/// Phase 5's Infralution.Localization.Wpf item built that lookup infrastructure; this class is
+/// one of the two real consumers (see ResxManager.cs's own doc comment for why a full
+/// ResxExtension-style markup extension wasn't ported, just the plain string-lookup it actually
+/// reduces to for every real usage in Kapok.View.Wpf).
 /// </summary>
 public abstract class ReportPage<TReportProcessor, TReportModel> : DialogPage
     where TReportProcessor : ReportProcessor<TReportModel>
@@ -133,19 +134,21 @@ public abstract class ReportPage<TReportProcessor, TReportModel> : DialogPage
         Close();
     }
 
+    private const string ResxName = "Kapok.View.Avalonia.Report.Resources.DataTableReportViewModel";
+
     protected void SendNotificationOnExportSuccessful()
     {
         ViewDomain.ShowInfoMessage(
-            "The report was exported successfully.",
-            "Export successful",
+            ResxManager.GetString(ResxName, "SendNotificationOnExportSuccessful_Message"),
+            ResxManager.GetString(ResxName, "SendNotificationOnExportSuccessful_Caption"),
             this);
     }
 
     protected void SendNotificationOnIOException(IOException exception)
     {
         ViewDomain.ShowErrorMessage(
-            "The report could not be saved to the selected file.",
-            "Export failed",
+            ResxManager.GetString(ResxName, "SendNotificationOnIOException_Message"),
+            ResxManager.GetString(ResxName, "SendNotificationOnIOException_Caption"),
             this, exception);
     }
 }

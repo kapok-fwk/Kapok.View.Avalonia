@@ -349,6 +349,18 @@ public class App : Application
                                    $"mimeTypes=[{string.Join(", ", reportPage?.SupportedMimeTypes.Select(m => m.DisplayName) ?? [])}] " +
                                    $"selected={reportPage?.SelectedMimeType?.DisplayName}");
 
+                // Phase 5's Infralution.Localization.Wpf item: prints the actual resx-resolved
+                // button captions and file-type label straight from the live rendered controls
+                // (not the resx file directly) - proves ResxManager's ResourceManager lookup
+                // really reached the controls under CultureInfo.CurrentUICulture (see
+                // Program.cs's KAPOK_HEADLESS_SCREENSHOT_CULTURE), not just that the resx parses.
+                var buttonCaptions = reportWindow?.GetVisualDescendants().OfType<Button>()
+                    .Select(b => b.Content?.ToString()) ?? [];
+                var fileTypeLabel = reportWindow?.GetVisualDescendants().OfType<TextBlock>()
+                    .FirstOrDefault(t => t.Text?.EndsWith(":") == true)?.Text;
+                Console.WriteLine($"KAPOK_HEADLESS_SCREENSHOT_REPORT: culture={System.Globalization.CultureInfo.CurrentUICulture} " +
+                                   $"buttons=[{string.Join(", ", buttonCaptions)}] fileTypeLabel=\"{fileTypeLabel}\"");
+
                 var reportScreenshotPath = Environment.GetEnvironmentVariable("KAPOK_HEADLESS_SCREENSHOT") + ".report.png";
                 for (var i = 0; i < 3; i++)
                 {
