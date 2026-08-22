@@ -368,6 +368,131 @@ public class App : Application
             selectionDone: ;
         }
 
+        // Phase 7 item 3 verification: per-column filters. Exercises the whole chain a user would
+        // drive - the page's real ToggleFilterVisibleAction to show the filter row, then typing a
+        // filter expression into one column's input and committing it - and prints the resulting
+        // DataSet content and user filter layer, since "the grid shows fewer rows" is only
+        // convincing if the filter object and the collection both actually changed.
+        if (Environment.GetEnvironmentVariable("KAPOK_HEADLESS_SCREENSHOT_FILTER") == "1" &&
+            page is Tasks tasksPage && tasksPage.DataSet is { } filterDataSet)
+        {
+            foreach (var taskName in new[] { "Buy milk", "Buy bread", "Call plumber" })
+            {
+                filterDataSet.CreateNewEntryAction.Execute();
+                if (filterDataSet.Current is { } newTask)
+                {
+                    newTask.Name = taskName;
+                    newTask.EstimatedTime = taskName.Length / 10m;
+                }
+            }
+            filterDataSet.Save();
+            Dispatcher.UIThread.RunJobs();
+
+            string Rows() => string.Join(", ", filterDataSet.Collection.Select(t => t.Name));
+            string FilterState() => $"userLayerProperties=[{string.Join(", ", filterDataSet.Filter.UserLayer.Properties.Select(f => f.PropertyInfo.Name + "=" + ((f as Kapok.BusinessLayer.IPropertyFilterStringFilter)?.FilterString ?? "?")))}]";
+
+            Console.WriteLine($"KAPOK_FILTER: seeded rows=[{Rows()}] {FilterState()}");
+
+            // The real toggle the Ribbon's "Filter" button is bound to - not IsFilterVisible set
+            // directly - so this proves the whole page-level path, not just the grid property.
+            tasksPage.ToggleFilterVisibleAction.Execute();
+            Dispatcher.UIThread.RunJobs();
+
+            var filterGrid = lastOpenedWindow!.GetVisualDescendants().OfType<CustomDataGrid>().First();
+            var filterControls = lastOpenedWindow.GetVisualDescendants().OfType<DataGridColumnFilter>().ToList();
+            Console.WriteLine($"KAPOK_FILTER: isFilterVisible={filterGrid.IsFilterVisible} columnHeaderHeight={filterGrid.ColumnHeaderHeight} filterInputs=" +
+                              $"[{string.Join(", ", filterControls.Select(f => (f.ColumnFilter?.PropertyBindingPath ?? "<no vm>") + (f.CanUserFilter ? "" : " (not filterable)") + $" visible={f.IsVisible} bounds={f.Bounds}"))}]");
+            Console.WriteLine($"KAPOK_FILTER: headers=[{string.Join(", ", lastOpenedWindow.GetVisualDescendants().OfType<DataGridColumnHeader>().Select(h => h.Bounds.ToString()))}]");
+
+            for (var i = 0; i < 3; i++)
+            {
+                Dispatcher.UIThread.RunJobs();
+                AvaloniaHeadlessPlatform.ForceRenderTimerTick();
+            }
+            var filterRowPath = Environment.GetEnvironmentVariable("KAPOK_HEADLESS_SCREENSHOT") + ".filter-row.png";
+            using (var frame = lastOpenedWindow.CaptureRenderedFrame())
+                frame?.Save(filterRowPath);
+            Console.WriteLine($"KAPOK_FILTER: saved filter-row screenshot to {filterRowPath}");
+
+            var nameFilter = filterControls.FirstOrDefault(f => f.ColumnFilter?.PropertyBindingPath == nameof(DataModel.Task.Name));
+            if (nameFilter?.ColumnFilter == null)
+            {
+                Console.WriteLine("KAPOK_FILTER: no filter input found for Task.Name");
+            }
+            else
+            {
+                // A real filter expression in Kapok's own filter-string syntax ('*' -> SQL LIKE).
+                nameFilter.ColumnFilter.QueryString = "Buy*";
+                nameFilter.ApplyFilter();
+                Dispatcher.UIThread.RunJobs();
+                Console.WriteLine($"KAPOK_FILTER: after \"Buy*\" rows=[{Rows()}] {FilterState()}");
+
+                // An expression the parser cannot make sense of for a decimal column - proves the
+                // validation path (INotifyDataErrorInfo -> the input's error tooltip) is live, not
+                // just the happy path.
+                var estimatedTimeFilter = filterControls.FirstOrDefault(f => f.ColumnFilter?.PropertyBindingPath == nameof(DataModel.Task.EstimatedTime));
+                if (estimatedTimeFilter?.ColumnFilter != null)
+                {
+                    estimatedTimeFilter.ColumnFilter.QueryString = "not-a-number";
+                    estimatedTimeFilter.ApplyFilter();
+                    Dispatcher.UIThread.RunJobs();
+                    var errors = estimatedTimeFilter.ColumnFilter.GetErrors(nameof(DataGridColumnFilterViewModel.QueryString))
+                        .Cast<object>().Select(e => (e as Kapok.BusinessLayer.BusinessLayerMessage)?.Text ?? e.ToString()).ToList();
+                    Console.WriteLine($"KAPOK_FILTER: invalid expression hasErrors={estimatedTimeFilter.ColumnFilter.HasErrors} errors=[{string.Join(" / ", errors)}]");
+                    estimatedTimeFilter.ColumnFilter.QueryString = string.Empty;
+                    estimatedTimeFilter.ApplyFilter();
+                    Dispatcher.UIThread.RunJobs();
+                }
+
+                for (var i = 0; i < 3; i++)
+                {
+                    Dispatcher.UIThread.RunJobs();
+                    AvaloniaHeadlessPlatform.ForceRenderTimerTick();
+                }
+                var filteredPath = Environment.GetEnvironmentVariable("KAPOK_HEADLESS_SCREENSHOT") + ".filtered.png";
+                using (var frame = lastOpenedWindow.CaptureRenderedFrame())
+                    frame?.Save(filteredPath);
+                Console.WriteLine($"KAPOK_FILTER: saved filtered screenshot to {filteredPath}");
+
+                // Clearing the input has to remove the property filter again, not just blank the box.
+                nameFilter.ColumnFilter.QueryString = string.Empty;
+                nameFilter.ApplyFilter();
+                Dispatcher.UIThread.RunJobs();
+                Console.WriteLine($"KAPOK_FILTER: after clearing rows=[{Rows()}] {FilterState()}");
+
+                // A filter that already exists on the user layer but is NOT a string filter (here
+                // a PropertyStaticFilter, the shape application code sets programmatically). Two
+                // ported branches only this exercises: SetQueryStringFromProperty rendering it
+                // back through IPropertyFilter.AsFilterString, and UpdateFilter replacing it with
+                // an equivalent string filter (IFilterSet.ReplacePropertyFilter) once the user
+                // types over it.
+                var priorityFilter = filterControls.FirstOrDefault(f => f.ColumnFilter?.PropertyBindingPath == nameof(DataModel.Task.Priority));
+                if (priorityFilter?.ColumnFilter != null)
+                {
+                    filterDataSet.Filter.UserLayer.Properties.Add(
+                        new Kapok.BusinessLayer.PropertyStaticFilter<DataModel.Task>(nameof(DataModel.Task.Priority))
+                        {
+                            FilterValue = DataModel.TaskPriority.Normal
+                        });
+                    Dispatcher.UIThread.RunJobs();
+                    Console.WriteLine($"KAPOK_FILTER: static filter shown as \"{priorityFilter.ColumnFilter.QueryString}\" " +
+                                      $"readOnly={priorityFilter.ColumnFilter.IsReadOnly} rows=[{Rows()}] " +
+                                      $"filterTypes=[{string.Join(", ", filterDataSet.Filter.UserLayer.Properties.Select(f => f.GetType().Name))}]");
+
+                    priorityFilter.ColumnFilter.QueryString = "High";
+                    priorityFilter.ApplyFilter();
+                    Dispatcher.UIThread.RunJobs();
+                    Console.WriteLine($"KAPOK_FILTER: after typing over it rows=[{Rows()}] {FilterState()} " +
+                                      $"filterTypes=[{string.Join(", ", filterDataSet.Filter.UserLayer.Properties.Select(f => f.GetType().Name))}]");
+
+                    priorityFilter.ColumnFilter.QueryString = string.Empty;
+                    priorityFilter.ApplyFilter();
+                    Dispatcher.UIThread.RunJobs();
+                    Console.WriteLine($"KAPOK_FILTER: after clearing it rows=[{Rows()}] {FilterState()}");
+                }
+            }
+        }
+
         // Phase 5 verification: proves LookupComboBox's dropdown DataGrid actually renders real
         // lookup rows, not just that the (closed) combo box exists. Opens the dropdown on
         // whichever LookupComboBox is in the just-shown window's visual tree, after the seed

@@ -81,6 +81,23 @@ public class ListPageView : UserControl
         if (collectionProperty?.GetValue(dataSet) is IEnumerable collection)
             _dataGrid.ItemsSource = collection;
 
+        // Per-column filter (item 3): bound before ColumnsSource so the header filter inputs can
+        // resolve their view models as soon as the first column headers are realized.
+        // DataSet.Filter is created in DataSetView's constructor, so UserLayer is always available
+        // here, unlike DataSet.Columns.
+        _dataGrid.Filter = dataSet.Filter.UserLayer;
+        _dataGrid.Bind(CustomDataGrid.IsFilterVisibleProperty,
+            new Binding(nameof(IDataSetReadonlyView.IsFilterVisible)) { Source = dataSet, Mode = BindingMode.OneWay });
+
+        // ListPage<TEntry> creates its ToggleFilterVisibleAction with IsVisible = false (see its
+        // constructor) and never turns it on - in WPF the filter row was reachable only through
+        // that page action, so it was effectively unreachable there. Whether an in-grid filter row
+        // exists at all is a property of the *view*, which is exactly what this control is, so this
+        // view turns the action on. Resolved by name: ToggleFilterVisibleAction is declared on the
+        // concrete ListPage<TEntry>, not on IDataPage.
+        if (dataPage.GetType().GetProperty("ToggleFilterVisibleAction")?.GetValue(dataPage) is IToggleAction toggleFilterVisibleAction)
+            toggleFilterVisibleAction.IsVisible = true;
+
         // Kapok's own column metadata - the same binding WPF's TableDataDataGrid style used.
         // It is normally still empty at this point (ListPage<TEntry> populates DataSet.Columns in
         // OnLoaded(), which runs after this control is attached), which is exactly why

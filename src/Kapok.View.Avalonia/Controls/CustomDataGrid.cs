@@ -9,7 +9,7 @@ using Avalonia.Data;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Styling;
-using Kapok.Entity;
+using Kapok.BusinessLayer;
 using Kapok.View.Avalonia.ValueConverter;
 
 namespace Kapok.View.Avalonia.Controls;
@@ -84,6 +84,56 @@ public class CustomDataGrid : DataGrid
         AutoGeneratingColumn += OnAutoGeneratingColumnApplyMetadata;
         SelectionChanged += OnSelectionChangedSyncSelectedEntries;
     }
+
+    #region Per-column filter
+
+    /// <summary>
+    /// The DataSet's user filter layer (<c>DataSet.Filter.UserLayer</c>) - the collection each
+    /// column's filter input adds/updates/removes its own
+    /// <see cref="Kapok.BusinessLayer.PropertyFilterStringFilter"/> in. Same binding WPF's
+    /// TableDataDataGrid style used.
+    /// </summary>
+    public static readonly StyledProperty<IPropertyFilterCollection?> FilterProperty =
+        AvaloniaProperty.Register<CustomDataGrid, IPropertyFilterCollection?>(nameof(Filter));
+
+    public IPropertyFilterCollection? Filter
+    {
+        get => GetValue(FilterProperty);
+        set => SetValue(FilterProperty, value);
+    }
+
+    /// <summary>
+    /// Whether the per-column filter row is shown under the column captions - bound to
+    /// <c>DataSet.IsFilterVisible</c>, which the page's <c>ToggleFilterVisibleAction</c> toggles
+    /// (the "Clear filter"/filter buttons in the Ribbon's Page group).
+    /// </summary>
+    public static readonly StyledProperty<bool> IsFilterVisibleProperty =
+        AvaloniaProperty.Register<CustomDataGrid, bool>(nameof(IsFilterVisible));
+
+    public bool IsFilterVisible
+    {
+        get => GetValue(IsFilterVisibleProperty);
+        set => SetValue(IsFilterVisibleProperty, value);
+    }
+
+    /// <summary>
+    /// Creates the filter view model for one column, or null when this grid has no filter bound
+    /// (a page whose DataSet exposes no user filter layer simply gets no filter row).
+    /// </summary>
+    private DataGridColumnFilterViewModel? CreateColumnFilterViewModel(string propertyName)
+    {
+        var filter = Filter;
+        if (filter == null)
+            return null;
+
+        var entryType = GetEntryType();
+        if (entryType == typeof(object) || entryType.GetProperty(propertyName) == null)
+            return null;
+
+        return new DataGridColumnFilterViewModel(filter, entryType, propertyName);
+    }
+
+    #endregion
 
     #region Bindable multi-selection 'SelectedEntries'
 
@@ -541,13 +591,13 @@ public class CustomDataGrid : DataGrid
         if (columnPropertyView.TextWrap)
             column.CellStyleClasses.Add(TextWrapCellClass);
 
-        ApplyColumnHeader(column, columnPropertyView);
-
         if (!columnPropertyView.IsFilterable)
             DataGridColumnExtensions.SetCanUserFilter(column, false);
+
+        ApplyColumnHeader(column, columnPropertyView);
     }
 
-    private static void ApplyColumnHeader(DataGridColumn column, ColumnPropertyView columnPropertyView)
+    private void ApplyColumnHeader(DataGridColumn column, ColumnPropertyView columnPropertyView)
     {
         var culture = CultureInfo.CurrentUICulture;
 
@@ -561,27 +611,53 @@ public class CustomDataGrid : DataGrid
 
         var description = columnPropertyView.DisplayDescription?.LanguageOrDefault(culture);
         var tooltipHeaderText = columnPropertyView.DisplayName?.LanguageOrDefault(culture) ?? header;
-
-        if (columnPropertyView.DisplayShortName == null && columnPropertyView.DisplayDescription == null)
-            return;
+        var hasTooltip = columnPropertyView.DisplayShortName != null || columnPropertyView.DisplayDescription != null;
 
         // WPF built the tooltip as a single StackPanel instance and parked it on an attached
         // property its column-header style then read. A single control instance cannot be reused
         // across regenerated headers in Avalonia (one visual parent per control), so the tooltip
         // is created fresh per header from a HeaderTemplate instead; the attached property is
-        // still set, so the filter header template (and anything else) can read it back.
-        var tooltip = BuildHeaderTooltip(tooltipHeaderText, description);
-        DataGridColumnExtensions.SetHeaderTooltip(column, tooltip);
+        // still set, so anything else can read it back.
+        if (hasTooltip)
+            DataGridColumnExtensions.SetHeaderTooltip(column, BuildHeaderTooltip(tooltipHeaderText, description));
 
+        var canUserFilter = DataGridColumnExtensions.GetCanUserFilter(column);
+        var propertyName = columnPropertyView.Name;
+
+        // The header is caption + per-column filter input, stacked - the same two-row header WPF
+        // achieved by replacing DataGridColumnHeader's entire ControlTemplate. Avalonia renders
+        // HeaderTemplate inside the stock header, so the real Fluent header chrome (resize
+        // grippers, sort indicator, hover states) stays untouched.
         column.HeaderTemplate = new FuncDataTemplate<object>((value, _) =>
         {
+            var panel = new StackPanel { Orientation = Orientation.Vertical };
+
             var textBlock = new TextBlock
             {
                 Text = value?.ToString(),
-                VerticalAlignment = VerticalAlignment.Center
+                VerticalAlignment = VerticalAlignment.Center,
+                TextWrapping = TextWrapping.Wrap
             };
-            ToolTip.SetTip(textBlock, BuildHeaderTooltip(tooltipHeaderText, description));
-            return textBlock;
+            if (hasTooltip)
+                ToolTip.SetTip(textBlock, BuildHeaderTooltip(tooltipHeaderText, description));
+            panel.Children.Add(textBlock);
+
+            var filterControl = new DataGridColumnFilter { CanUserFilter = canUserFilter };
+            filterControl.Bind(IsVisibleProperty, new Binding(nameof(IsFilterVisible)) { Source = this });
+
+            // The view model is created when the header is actually realized, not here: the grid's
+            // Filter is bound by its host after the columns are generated (see ListPageView), and
+            // a column can also be regenerated when the page's current list view changes.
+            filterControl.AttachedToVisualTree += (_, _) =>
+                filterControl.ColumnFilter ??= CreateColumnFilterViewModel(propertyName);
+            filterControl.DetachedFromVisualTree += (_, _) =>
+            {
+                filterControl.ColumnFilter?.Detach();
+                filterControl.ColumnFilter = null;
+            };
+
+            panel.Children.Add(filterControl);
+            return panel;
         }, supportsRecycling: false);
     }
 

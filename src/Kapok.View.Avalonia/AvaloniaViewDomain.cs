@@ -361,10 +361,12 @@ public class AvaloniaViewDomain : ViewDomain, IAvaloniaViewDomain
         // pipeline is UI-framework-agnostic (server-side re-query, not a client-side
         // ICollectionView). WPF's WpfDataSetView<TEntry> only adds WPF DataGrid-specific sugar on
         // top (CollectionViewSource/IEditableCollectionView for the {NewItemPlaceholder} inline
-        // add-row and grid-native sort/group). None of that is needed for Phase 1's plain-window
-        // list binding, so we bind directly to the core class - an Avalonia-specific subclass can
-        // be introduced in the DataGrid phase if the eventual grid choice needs similar hooks.
-        return new DataSetView<TEntry>(ServiceProvider, dataDomainScope, entityService);
+        // add-row and grid-native sort/group), which Avalonia's DataGrid has no equivalent of.
+        // Phase 1 therefore used the core class directly and flagged that a subclass would arrive
+        // with the DataGrid work if it needed hooks - Phase 7's per-column filter is that point:
+        // AvaloniaDataSetView<TEntry> implements the filter-visible toggle the core class leaves
+        // to the view layer (see its own doc comment).
+        return new AvaloniaDataSetView<TEntry>(ServiceProvider, dataDomainScope, entityService);
     }
 
     public override IHierarchyDataSetView<TEntry> CreateHierarchyDataSetView<TEntry>(IDataDomainScope dataDomainScope, IEntityService<TEntry>? entityService = null)
