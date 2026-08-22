@@ -1,7 +1,10 @@
 using System.Collections;
 using Avalonia.Controls;
+using Avalonia.Data;
+using Avalonia.Input;
 using Avalonia.Markup.Xaml.Styling;
 using Kapok.View.Avalonia.Controls;
+using Kapok.View.Avalonia.ValueConverter;
 
 namespace Kapok.View.Avalonia.DefaultPageControls;
 
@@ -47,6 +50,11 @@ public class ListPageView : UserControl
             CanUserSortColumns = true,
             CanUserResizeColumns = true,
             CanUserReorderColumns = true,
+            // Matches WPF's TableDataDataGrid style (SelectionMode=Extended). Every
+            // IDataSetSelectionAction<TEntry> - DeleteEntryAction, EditEntryAction, the Ribbon's
+            // table-data buttons - takes a *list* of entries, so multi-selection is the contract,
+            // not an optional extra.
+            SelectionMode = DataGridSelectionMode.Extended,
             IsReadOnly = true // cell editing is Excel-navigation territory, not built yet
         };
         Content = _dataGrid;
@@ -81,11 +89,28 @@ public class ListPageView : UserControl
         // reflection-generated columns stand in until then.
         _dataGrid.ColumnsSource = (IList)dataSet.Columns;
 
-        // DataGrid.SelectedItems turned out to be a get-only CLR property backed by its own
-        // internal collection (no SelectedItemsProperty AvaloniaProperty exists to bind into,
-        // unlike WPF's DataGrid, which needed CustomDataGrid's own bindable re-implementation for
-        // the same reason) - syncing it to DataSet.SelectedEntries needs a two-way manual sync
-        // (subscribe to both collections' CollectionChanged), not a plain Bind() call. Not built
-        // yet - flagged rather than silently dropped.
+        // Selection, matching WPF's TableDataDataGrid style's SelectedItem/SelectedItems setters.
+        // DataGrid.SelectedItems is a get-only CLR property in Avalonia with no AvaloniaProperty
+        // behind it, so the multi-selection side goes through CustomDataGrid.SelectedEntries (see
+        // that property) rather than a direct Bind() - the single-selection side binds natively.
+        _dataGrid.Bind(DataGrid.SelectedItemProperty,
+            new Binding(nameof(IDataSetReadonlyView.Current)) { Source = dataSet, Mode = BindingMode.TwoWay });
+        _dataGrid.Bind(CustomDataGrid.SelectedEntriesProperty,
+            new Binding(nameof(IDataSetReadonlyView.SelectedEntries)) { Source = dataSet, Mode = BindingMode.TwoWay });
+
+        // Ctrl+A -> DataSet.SelectAllAction, the same KeyBinding WPF's ListPageControl.xaml
+        // declares on its CustomDataGrid. SelectAllAction is declared on the concrete
+        // DataSetView<TEntry> class, not on any IDataSetView interface (checked - the interfaces
+        // only carry SortAscendingAction/SortDescendingAction/ToggleFilterVisibleAction/
+        // ClearUserFilterAction), so it is resolved by name; a page whose DataSet does not have it
+        // simply gets no shortcut rather than an exception.
+        if (dataSet.GetType().GetProperty("SelectAllAction")?.GetValue(dataSet) is IAction selectAllAction)
+        {
+            _dataGrid.KeyBindings.Add(new KeyBinding
+            {
+                Gesture = new KeyGesture(Key.A, KeyModifiers.Control),
+                Command = new ActionCommand(selectAllAction)
+            });
+        }
     }
 }

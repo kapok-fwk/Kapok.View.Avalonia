@@ -270,6 +270,104 @@ public class App : Application
             }
         }
 
+        // Phase 7 item 2 verification: DataSet.SelectedEntries two-way sync. A screenshot can show
+        // highlighted rows but cannot show what the *data* side ended up holding, which is the
+        // whole point of this feature - IDataSetSelectionAction<TEntry> consumers
+        // (DeleteEntryAction, EditEntryAction, the Ribbon's table-data buttons) cast
+        // DataSet.SelectedEntries to IList<TEntry> and act on it. So this exercises both
+        // directions on real, saved rows and prints the resulting state, including the concrete
+        // list type and whether the real DeleteEntryAction accepts it.
+        var selectionMode = Environment.GetEnvironmentVariable("KAPOK_HEADLESS_SCREENSHOT_SELECTION");
+        if (selectionMode != null &&
+            page is IDataPage { DataSet: { } selectionDataSet })
+        {
+            // Three real rows through the normal business-layer pipeline - multi-selection cannot
+            // be proven with the single row KAPOK_HEADLESS_SCREENSHOT_SEED creates.
+            for (var i = 1; i <= 3; i++)
+            {
+                selectionDataSet.CreateNewEntryAction.Execute();
+                if (selectionDataSet.Current is DataModel.TaskList seededList)
+                    seededList.Name = $"List {i}";
+            }
+            selectionDataSet.Save();
+            for (var i = 0; i < 5; i++)
+            {
+                Dispatcher.UIThread.RunJobs();
+                AvaloniaHeadlessPlatform.ForceRenderTimerTick();
+            }
+
+            var grid = lastOpenedWindow!.GetVisualDescendants().OfType<CustomDataGrid>().First();
+            var rows = grid.ItemsSource!.Cast<object>().ToList();
+
+            void DumpRenderedCells(string label) =>
+                Console.WriteLine($"KAPOK_SELECTION: {label} renderedCells=[" +
+                                  string.Join(" | ", grid.GetVisualDescendants().OfType<DataGridRow>()
+                                      .Select(r => $"selected={r.GetValue(DataGridRow.IsSelectedProperty)}/dataContext={(r.DataContext as DataModel.TaskList)?.Name}/y={r.Bounds.Y}/text=" +
+                                                   string.Join(",", r.GetVisualDescendants().OfType<TextBlock>().Select(t => t.Text)))) + "]");
+
+            DumpRenderedCells("after seed");
+            if (selectionMode == "seedonly")
+            {
+                Console.WriteLine($"KAPOK_SELECTION: seedonly items=[{string.Join(", ", rows.Cast<DataModel.TaskList>().Select(t => t.Name))}]");
+                goto selectionDone;
+            }
+
+            string Describe(System.Collections.IList? list) => list == null
+                ? "<null>"
+                : $"{list.GetType().Name}<{(list.GetType().IsGenericType ? list.GetType().GetGenericArguments()[0].Name : "?")}>" +
+                  $"[{string.Join(", ", list.Cast<object>().Select(o => (o as DataModel.TaskList)?.Name ?? o.ToString()))}]";
+
+            // Direction 1: grid selection -> DataSet.SelectedEntries.
+            grid.SelectedItems.Clear();
+            grid.SelectedItems.Add(rows[0]);
+            grid.SelectedItems.Add(rows[2]);
+            Dispatcher.UIThread.RunJobs();
+            Console.WriteLine($"KAPOK_SELECTION: grid->dataSet gridSelected={grid.SelectedItems.Count} " +
+                              $"selectedEntries={Describe(selectionDataSet.SelectedEntries)} " +
+                              $"current={(selectionDataSet.Current as DataModel.TaskList)?.Name ?? "<null>"}");
+
+            var partialSelectionPath = Environment.GetEnvironmentVariable("KAPOK_HEADLESS_SCREENSHOT") + ".partial-selection.png";
+            for (var i = 0; i < 3; i++)
+            {
+                Dispatcher.UIThread.RunJobs();
+                AvaloniaHeadlessPlatform.ForceRenderTimerTick();
+            }
+            using (var partialFrame = lastOpenedWindow.CaptureRenderedFrame())
+                partialFrame?.Save(partialSelectionPath);
+            Console.WriteLine($"KAPOK_SELECTION: saved partial-selection screenshot to {partialSelectionPath}");
+
+            // The actual contract this sync exists for: the real DeleteEntryAction (an
+            // IDataSetSelectionAction<TaskList>) has to accept the list as-is. This is what would
+            // throw an InvalidCastException if the snapshot were a List<object>.
+            Console.WriteLine($"KAPOK_SELECTION: deleteEntryAction.CanExecute(selectedEntries)=" +
+                              $"{selectionDataSet.DeleteEntryAction.CanExecute(selectionDataSet.SelectedEntries)}");
+
+            // Direction 2: DataSet.SelectedEntries -> grid selection, driven by the real
+            // DataSet.SelectAllAction (which assigns Collection.ToList()).
+            var selectAllAction = (IAction)selectionDataSet.GetType().GetProperty("SelectAllAction")!.GetValue(selectionDataSet)!;
+            selectAllAction.Execute();
+            Dispatcher.UIThread.RunJobs();
+            Console.WriteLine($"KAPOK_SELECTION: dataSet->grid (SelectAllAction) gridSelected=" +
+                              $"[{string.Join(", ", grid.SelectedItems.Cast<DataModel.TaskList>().Select(t => t.Name))}]");
+
+            // And the same thing through the real Ctrl+A KeyBinding ListPageView installs, rather
+            // than by calling the action directly - proves the shortcut is actually wired.
+            grid.SelectedItems.Clear();
+            Dispatcher.UIThread.RunJobs();
+            grid.RaiseEvent(new KeyEventArgs
+            {
+                RoutedEvent = InputElement.KeyDownEvent,
+                Key = Key.A,
+                KeyModifiers = KeyModifiers.Control
+            });
+            Dispatcher.UIThread.RunJobs();
+            Console.WriteLine($"KAPOK_SELECTION: ctrl+A gridSelected={grid.SelectedItems.Count} " +
+                              $"selectedEntries={Describe(selectionDataSet.SelectedEntries)}");
+            DumpRenderedCells("after ctrl+A");
+
+            selectionDone: ;
+        }
+
         // Phase 5 verification: proves LookupComboBox's dropdown DataGrid actually renders real
         // lookup rows, not just that the (closed) combo box exists. Opens the dropdown on
         // whichever LookupComboBox is in the just-shown window's visual tree, after the seed

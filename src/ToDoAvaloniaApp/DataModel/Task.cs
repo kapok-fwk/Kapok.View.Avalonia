@@ -6,7 +6,9 @@ namespace ToDoAvaloniaApp.DataModel;
 
 public class Task : EditableEntityBase
 {
-    private Guid _id;
+    // Client-generated - see TaskList.Id's comment for why an all-zero Guid primary key breaks
+    // row identity in the DataGrid.
+    private Guid _id = Guid.NewGuid();
     private string _name = string.Empty;
     private string? _description;
     private DateTime? _dueDate;
@@ -16,6 +18,7 @@ public class Task : EditableEntityBase
 
     [Key]
     [Display(Name = nameof(Id))]
+    [DatabaseGenerated(DatabaseGeneratedOption.None)]
     public Guid Id
     {
         get => _id;

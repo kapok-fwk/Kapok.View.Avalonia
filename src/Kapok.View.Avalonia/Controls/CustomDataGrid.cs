@@ -82,7 +82,122 @@ public class CustomDataGrid : DataGrid
         });
 
         AutoGeneratingColumn += OnAutoGeneratingColumnApplyMetadata;
+        SelectionChanged += OnSelectionChangedSyncSelectedEntries;
     }
+
+    #region Bindable multi-selection 'SelectedEntries'
+
+    /// <summary>
+    /// Two-way mirror of <c>DataSet.SelectedEntries</c> - the list every
+    /// <see cref="IDataSetSelectionAction{TEntry}"/> (DeleteEntryAction, EditEntryAction, the
+    /// Ribbon's table-data buttons, ...) actually operates on.
+    ///
+    /// Needed because <see cref="DataGrid.SelectedItems"/> is a get-only CLR property in Avalonia
+    /// with no AvaloniaProperty behind it, so it cannot be bound at all (WPF's DataGrid had the
+    /// same gap, which is why its CustomDataGrid declared its own <c>SelectedItems</c>
+    /// DependencyProperty).
+    /// </summary>
+    public static readonly StyledProperty<IList?> SelectedEntriesProperty =
+        AvaloniaProperty.Register<CustomDataGrid, IList?>(
+            nameof(SelectedEntries), defaultBindingMode: BindingMode.TwoWay);
+
+    public IList? SelectedEntries
+    {
+        get => GetValue(SelectedEntriesProperty);
+        set => SetValue(SelectedEntriesProperty, value);
+    }
+
+    /// <summary>Guards the two sync directions against re-entering each other.</summary>
+    private bool _syncingSelection;
+
+    private void OnSelectionChangedSyncSelectedEntries(object? sender, SelectionChangedEventArgs e)
+    {
+        // Matches WPF's OnSelectionChanged_MoveToSelectedEntry: keep the newly selected row
+        // visible. Avalonia's ScrollIntoView takes an explicit column (null = the current one).
+        if (e.AddedItems.Count == 1)
+            ScrollIntoView(e.AddedItems[0]!, null);
+
+        if (_syncingSelection)
+            return;
+
+        _syncingSelection = true;
+        try
+        {
+            SetCurrentValue(SelectedEntriesProperty, CreateSelectionSnapshot());
+        }
+        finally
+        {
+            _syncingSelection = false;
+        }
+    }
+
+    /// <summary>
+    /// Copies the grid's current selection into a fresh, strongly typed
+    /// <c>List&lt;TEntry&gt;</c>.
+    ///
+    /// Both parts matter. **Fresh**: <c>DataSetView.SelectedEntries</c> is a plain property raising
+    /// PropertyChanged on assignment (not an observable collection), so handing it the grid's own
+    /// live SelectedItems instance - which is what WPF's CustomDataGrid did - would notify exactly
+    /// once and then silently mutate underneath every binding. **Strongly typed**: consumers cast
+    /// the value to <c>IList&lt;TEntry&gt;</c> (see ActionCommand.ForGeneric, which the Ribbon's
+    /// table-data buttons are built on, and DataSetView's own
+    /// <c>IDataSetReadonlyView&lt;TEntry&gt;.SelectedEntries</c> accessor), so a
+    /// <c>List&lt;object&gt;</c> would throw an InvalidCastException on the first click.
+    /// </summary>
+    private IList CreateSelectionSnapshot()
+    {
+        var list = (IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(GetEntryType()))!;
+        foreach (var item in SelectedItems)
+            list.Add(item);
+        return list;
+    }
+
+    /// <summary>
+    /// The entity type of the bound collection. Read off ItemsSource's own
+    /// <c>IEnumerable&lt;T&gt;</c> - the DataSet's live <c>ObservableCollection&lt;TEntry&gt;</c> -
+    /// since this control is shared across every entity type and has no TEntry of its own.
+    /// </summary>
+    private Type GetEntryType()
+    {
+        var enumerableInterface = ItemsSource?.GetType().GetInterfaces()
+            .FirstOrDefault(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IEnumerable<>));
+
+        return enumerableInterface?.GetGenericArguments()[0]
+               ?? ItemsSource?.Cast<object>().FirstOrDefault()?.GetType()
+               ?? typeof(object);
+    }
+
+    /// <summary>
+    /// Applies a selection coming from the data side (e.g. <c>DataSet.SelectAllAction</c>, which
+    /// assigns <c>Collection.ToList()</c>) to the grid.
+    ///
+    /// WPF's equivalent simply called <c>SelectAll()</c> and ignored the incoming list entirely -
+    /// correct only for the one caller that happened to exist. Avalonia's SelectedItems collection
+    /// is mutable, so the actual list can be applied here.
+    /// </summary>
+    private void ApplySelectedEntriesToSelection(IList? entries)
+    {
+        _syncingSelection = true;
+        try
+        {
+            SelectedItems.Clear();
+
+            if (entries == null)
+                return;
+
+            foreach (var entry in entries)
+            {
+                if (entry != null)
+                    SelectedItems.Add(entry);
+            }
+        }
+        finally
+        {
+            _syncingSelection = false;
+        }
+    }
+
+    #endregion
 
     #region Bindable columns 'ColumnsSource'
 
@@ -107,6 +222,8 @@ public class CustomDataGrid : DataGrid
 
         if (change.Property == ColumnsSourceProperty)
             OnColumnsSourceChanged(change.GetOldValue<IList?>(), change.GetNewValue<IList?>());
+        else if (change.Property == SelectedEntriesProperty && !_syncingSelection)
+            ApplySelectedEntriesToSelection(change.GetNewValue<IList?>());
     }
 
     private void OnColumnsSourceChanged(IList? oldValue, IList? newValue)
