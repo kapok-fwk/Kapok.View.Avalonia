@@ -160,6 +160,33 @@ public class App : Application
         // CreateNewEntryAction was the artificial part.
         Dispatcher.UIThread.RunJobs();
 
+        // Phase 7 item 1 verification: switching the page's current list view is a real Kapok
+        // feature (WPF's ListPageControl toolbar has a menu for it) and the one thing that
+        // actually re-drives CustomDataGrid's ColumnsSource CollectionChanged path at runtime -
+        // ListPage<TEntry>.OnCurrentListViewChanged clears DataSet.Columns and re-adds the new
+        // view's columns. Setting it to "none" clears the columns entirely, which is what
+        // exercises the plain-reflection AutoGeneratingColumn fallback (and the metadata that
+        // handler applies to reflection-generated columns).
+        // Runs *before* the seed block below, not after: OnCurrentListViewChanged calls
+        // RequestSaveData + DataSet.Refresh, which hits the same EntityDeferredCommitService
+        // deadlock Phase 5 already documented (a Load/Refresh against a DataSet holding an
+        // uncommitted entity with an FK navigation property) - confirmed the hard way here again
+        // by hanging indefinitely when it ran after the seed. A real user switches list views on a
+        // saved list, so this ordering is also the realistic one.
+        var listViewName = Environment.GetEnvironmentVariable("KAPOK_HEADLESS_SCREENSHOT_LIST_VIEW");
+        if (listViewName != null)
+        {
+            var currentListViewProperty = page.GetType().GetProperty("CurrentListView")!;
+            var listViewsProperty = page.GetType().GetProperty("ListViews")!;
+            var listViews = ((IEnumerable<DataSetListView>)listViewsProperty.GetValue(page)!).ToList();
+            var selected = listViewName == "none"
+                ? null
+                : listViews.FirstOrDefault(v => v.Name == listViewName);
+            currentListViewProperty.SetValue(page, selected);
+            Console.WriteLine($"KAPOK_LIST_VIEW: available=[{string.Join(", ", listViews.Select(v => v.Name))}] selected={selected?.Name ?? "<null>"}");
+            Dispatcher.UIThread.RunJobs();
+        }
+
         // Phase 4 verification-only: ToDoAvaloniaApp seeds no data, so the DataGrid added to
         // ListPageView would otherwise render zero rows either way (correctly, but
         // unconvincingly). Creating one real entry through the normal CreateNewEntryAction
@@ -190,6 +217,56 @@ public class App : Application
             else
             {
                 dataSet.CreateNewEntryAction.Execute();
+
+                // Phase 7 item 1: a blank row proves the columns exist but not that they render
+                // real values in the right format/alignment (a right-aligned decimal, a date
+                // formatted through DataType(Date)'s "d", a localized enum caption, wrapped
+                // text). Filled through the DataSet's own live Current entity - the real
+                // business-layer object, not an injected fake row.
+                // A seeded TaskList with an empty Name renders as a visually empty row now that
+                // the grid only shows the metadata-defined Name column (before Phase 7 the
+                // auto-generated Id column made the row obvious) - naming it keeps the screenshot
+                // evidence readable.
+                if (page is TaskLists && dataSet.Current is DataModel.TaskList newTaskList)
+                    newTaskList.Name = "Groceries";
+
+                if (page is Tasks && dataSet.Current is DataModel.Task newTask)
+                {
+                    newTask.Name = "Buy milk";
+                    newTask.Description = "Two litres of whole milk, plus oat milk if the shop has any left.";
+                    newTask.EstimatedTime = 1.25m;
+                    newTask.DueDate = new DateTime(2026, 3, 17);
+                    newTask.Priority = DataModel.TaskPriority.High;
+                }
+            }
+        }
+
+        // Phase 7 item 1 verification: a screenshot alone cannot prove *why* a column looks the
+        // way it does (which column type was generated, whether IsHidden really suppressed one,
+        // what the header tooltip resolved to, whether IsFilterable was carried over). Prints the
+        // real generated column objects off the live grid so the metadata-driven generation can be
+        // checked as data, not just visually.
+        if (Environment.GetEnvironmentVariable("KAPOK_HEADLESS_SCREENSHOT_DUMP_COLUMNS") == "1")
+        {
+            Dispatcher.UIThread.RunJobs();
+
+            var listGrid = lastOpenedWindow?.GetVisualDescendants().OfType<CustomDataGrid>().FirstOrDefault();
+            Console.WriteLine($"KAPOK_DUMP_COLUMNS: autoGenerate={listGrid?.AutoGenerateColumns} " +
+                              $"columnsSourceCount={listGrid?.ColumnsSource?.Count} columns={listGrid?.Columns.Count} " +
+                              $"items={listGrid?.ItemsSource?.Cast<object>().Count()} " +
+                              $"realizedRows={listGrid?.GetVisualDescendants().OfType<DataGridRow>().Count()}");
+            foreach (var column in listGrid?.Columns ?? new System.Collections.ObjectModel.ObservableCollection<DataGridColumn>())
+            {
+                var columnViewModel = DataGridColumnExtensions.GetColumnViewModel(column) as ColumnPropertyView;
+                var tooltip = DataGridColumnExtensions.GetHeaderTooltip(column) as Panel;
+                var tooltipText = tooltip == null
+                    ? "<none>"
+                    : string.Join(" | ", tooltip.Children.OfType<TextBlock>().Select(t => t.Text));
+                Console.WriteLine($"KAPOK_DUMP_COLUMNS:   type={column.GetType().Name} header=\"{column.Header}\" " +
+                                  $"property={columnViewModel?.Name} readOnly={column.IsReadOnly} " +
+                                  $"width={column.Width.UnitType}:{column.Width.Value} " +
+                                  $"classes=[{string.Join(",", column.CellStyleClasses)}] " +
+                                  $"canUserFilter={DataGridColumnExtensions.GetCanUserFilter(column)} tooltip=\"{tooltipText}\"");
             }
         }
 

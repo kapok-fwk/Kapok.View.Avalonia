@@ -9,13 +9,26 @@ public class Tasks : ListPage<Task>
     {
         Title = "Tasks";
 
+        // Phase 7 item 1: these column definitions are what CustomDataGrid.ColumnsSource actually
+        // generates the grid's columns from. Deliberately exercises every ColumnPropertyView
+        // option the generator understands - explicit Width, TextWrap, IsHidden, an enum property,
+        // a numeric property (right-aligned), a [DataType(Date)] property (string format "d") and
+        // a property carrying DisplayShortName/DisplayDescription (header caption vs. tooltip) -
+        // rather than the minimal two-column list this page had while the grid was still on plain
+        // AutoGenerateColumns.
         ListViews.Add(new DataSetListView
         {
             Name = "Standard",
             Columns = new List<ColumnPropertyView>
             {
-                new(nameof(Task.Name)),
-                new(nameof(Task.EstimatedTime)),
+                new(nameof(Task.Name)) { Width = 160 },
+                new(nameof(Task.Priority)),
+                new(nameof(Task.Description)) { Width = 200, TextWrap = true },
+                new(nameof(Task.EstimatedTime)) { Width = 90 },
+                new(nameof(Task.DueDate)) { Width = 110 },
+                // Proves IsHidden really suppresses a column: the property is part of the list
+                // view, but must not appear in the grid.
+                new(nameof(Task.Id)) { IsHidden = true },
             }
         });
         ListViews.Add(new DataSetListView
