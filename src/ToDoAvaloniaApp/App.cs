@@ -1400,22 +1400,40 @@ public class App : Application
                     // rest of the pipeline (ReportEngine, TaskListsReportProcessor,
                     // ProcessToDataTable) end to end without depending on a system library this
                     // Mac doesn't have.
-                    using var stream = new MemoryStream();
-                    new global::Kapok.Report.ReportEngine(GetService<IDataDomain>()).ExecuteReport(
-                        new ToDoAvaloniaApp.Report.TaskListsReport(),
-                        new Dictionary<string, object>
-                        {
-                            [nameof(ToDoAvaloniaApp.Report.TaskListsReport.IncludeArchived)] = true,
-                            // Real values for the two new parameters (Phase 8 item 7), not just
-                            // structurally present - proves TaskListsReportProcessor genuinely
-                            // reads them back out of ParameterValues by name.
-                            [nameof(ToDoAvaloniaApp.Report.TaskListsReport.SortBy)] = "IsArchived",
-                            [nameof(ToDoAvaloniaApp.Report.TaskListsReport.GeneratedOn)] = new DateTime(2026, 1, 15)
-                        },
-                        "text/csv",
-                        stream);
-                    Console.WriteLine($"KAPOK_HEADLESS_SCREENSHOT_REPORT: ExecuteReport produced {stream.Length} bytes:");
-                    Console.WriteLine(System.Text.Encoding.UTF8.GetString(stream.ToArray()));
+                    // Guarded like the OpenReportDialog call above: ReportEngine.GetOrCreateReportModel
+                    // (Kapok.Report.BusinessLayer.ReportModelService.GetOrCreateFromType) queries then
+                    // inserts a ReportModel row keyed by TypeFullName with no locking between the
+                    // independent IDataDomainScope each ReportEngine public method opens for itself -
+                    // MimeTypeReportPage's constructor alone calls three such methods back to back
+                    // (GetOrCreateReportLayout, GetSupportedMimeTypes, and this ExecuteReport call).
+                    // First seen failing here on Linux CI (SQLite Error 19: UNIQUE constraint failed:
+                    // ReportModel.TypeFullName) though dozens of local macOS runs never hit it - a
+                    // genuine race in the external Kapok.Report package, out of scope to fix in this
+                    // repo. Catching it here keeps this diagnostic scenario from taking the whole
+                    // process down (exit 134) over an unrelated package's bug.
+                    try
+                    {
+                        using var stream = new MemoryStream();
+                        new global::Kapok.Report.ReportEngine(GetService<IDataDomain>()).ExecuteReport(
+                            new ToDoAvaloniaApp.Report.TaskListsReport(),
+                            new Dictionary<string, object>
+                            {
+                                [nameof(ToDoAvaloniaApp.Report.TaskListsReport.IncludeArchived)] = true,
+                                // Real values for the two new parameters (Phase 8 item 7), not just
+                                // structurally present - proves TaskListsReportProcessor genuinely
+                                // reads them back out of ParameterValues by name.
+                                [nameof(ToDoAvaloniaApp.Report.TaskListsReport.SortBy)] = "IsArchived",
+                                [nameof(ToDoAvaloniaApp.Report.TaskListsReport.GeneratedOn)] = new DateTime(2026, 1, 15)
+                            },
+                            "text/csv",
+                            stream);
+                        Console.WriteLine($"KAPOK_HEADLESS_SCREENSHOT_REPORT: ExecuteReport produced {stream.Length} bytes:");
+                        Console.WriteLine(System.Text.Encoding.UTF8.GetString(stream.ToArray()));
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"KAPOK_HEADLESS_SCREENSHOT_REPORT: ExecuteReport threw: {ex}");
+                    }
                 }
 
                 reportWindow?.Close();
