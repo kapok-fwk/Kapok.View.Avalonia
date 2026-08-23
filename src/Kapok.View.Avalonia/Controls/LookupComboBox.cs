@@ -75,6 +75,24 @@ public class LookupComboBox : CustomComboBox
             // overridable method in Avalonia (DropDownOpened/DropDownClosed are plain events
             // raised from PopupOpened/PopupClosed, confirmed via reflection - not protected
             // virtual OnDropDownOpened(EventArgs) like WPF's), so this subscribes instead.
+
+            // Phase 8 item 3 fix for the long-open "dropdown renders itemsCount=1 columns=0
+            // rows=0" gap (see the porting plan's Phase 6/7 handoffs). The Phase 6 theory
+            // ("Avalonia's DataGrid needs a real measure pass, which Popup.Child never gets
+            // under headless") turned out not to be the actual mechanism - CustomDataGrid's own
+            // ResetColumnsFromColumnsSource (Phase 7 item 1) already found and documented the
+            // real one: Avalonia's DataGrid only runs AutoGeneratingColumn while *(re)binding*
+            // ItemsSource, not from AutoGenerateColumns flipping or from layout. DropDownDataGrid's
+            // ItemsSource is wired via a plain Bind() call in OnApplyTemplate, before the popup's
+            // Child has ever been part of a real, opened visual tree - re-assigning it here, once
+            // the popup (and therefore its Child) actually exists and is opening, forces the same
+            // regeneration CustomDataGrid's own fix relies on.
+            if (DropDownDataGrid is { ItemsSource: { } items })
+            {
+                DropDownDataGrid.ItemsSource = null;
+                DropDownDataGrid.ItemsSource = items;
+            }
+
             if (DropDownDataGrid?.SelectedItem is { } selected)
                 DropDownDataGrid.ScrollIntoView(selected, null);
         };
