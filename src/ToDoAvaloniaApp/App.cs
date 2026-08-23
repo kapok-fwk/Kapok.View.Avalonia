@@ -163,6 +163,25 @@ public class App : Application
         // CreateNewEntryAction was the artificial part.
         Dispatcher.UIThread.RunJobs();
 
+        // Phase 8 item 7 verification: TestPage now opens (was NotSupportedException since Phase
+        // 1 - see ToDoModule.cs) and, being Dock-hosted with a real DetailPages entry, proves
+        // InteractivePage.DetailPages -> DockPageWindow's ToolDock wiring for the first time
+        // anywhere in this port (see DockPageWindow.cs's own "not live-verified" comment).
+        if (pageTypeName == "TestPage" && page is TestPage testPage)
+        {
+            for (var i = 0; i < 5; i++)
+            {
+                Dispatcher.UIThread.RunJobs();
+                AvaloniaHeadlessPlatform.ForceRenderTimerTick();
+            }
+
+            var toolTitleFound = lastOpenedWindow?.GetVisualDescendants().OfType<TextBlock>()
+                .Any(t => t.Text == "Task lists (detail)") ?? false;
+            Console.WriteLine($"KAPOK_TEST_PAGE: detailPagesCount={testPage.DetailPages.Count} " +
+                              $"detailPageTitle={testPage.DetailPages.FirstOrDefault()?.Title} " +
+                              $"toolPaneTitleRendered={toolTitleFound}");
+        }
+
         // Phase 7 item 1 verification: switching the page's current list view is a real Kapok
         // feature (WPF's ListPageControl toolbar has a menu for it) and the one thing that
         // actually re-drives CustomDataGrid's ColumnsSource CollectionChanged path at runtime -

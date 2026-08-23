@@ -70,6 +70,7 @@ run_scenario() {
 # needs: either it reproduces identically (a real headless-only limitation, not OS-specific) or it
 # doesn't (pointing at something macOS/Avalonia.Native-specific instead).
 run_scenario mainpage
+run_scenario testpage KAPOK_HEADLESS_SCREENSHOT_PAGE=TestPage
 run_scenario tasklists-empty KAPOK_HEADLESS_SCREENSHOT_PAGE=TaskLists
 run_scenario tasklists-seeded KAPOK_HEADLESS_SCREENSHOT_PAGE=TaskLists KAPOK_HEADLESS_SCREENSHOT_SEED=1 KAPOK_HEADLESS_SCREENSHOT_DUMP_COLUMNS=1
 run_scenario tasks-seeded KAPOK_HEADLESS_SCREENSHOT_PAGE=Tasks KAPOK_HEADLESS_SCREENSHOT_SEED=1

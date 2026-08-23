@@ -3,6 +3,7 @@ using Kapok.Module;
 using Kapok.Report;
 using Kapok.View;
 using Kapok.View.Avalonia;
+using Kapok.View.Avalonia.Dock;
 using Kapok.View.Avalonia.Windows;
 using ToDoAvaloniaApp.BusinessLogic;
 using ToDoAvaloniaApp.DataModel;
@@ -43,6 +44,20 @@ public class ToDoModule : ModuleBase
         // did for the WPF version's MainPageWindow. Reuses the generic PageWindow rather than a
         // dedicated MainPageWindow subclass - no custom chrome needed yet in this phase.
         AvaloniaViewDomain.RegisterPageWindowConstructor<MainPage>(() => new PageWindow());
+
+        // Phase 8 item 7: TestPage (see View/TestPage.cs) is the exact same shape as MainPage - a
+        // plain InteractivePage, not IListPage/IDialogPage/ICardPage - but never got the same
+        // registration MainPage got above, so showing it threw NotSupportedException
+        // ("No Avalonia window defined for page") since Phase 1. Confirmed by reading
+        // AvaloniaViewDomain.ConstructWindow: it has no fallback at all for a page that isn't one
+        // of those three, matching MainPage's own comment above almost exactly - this was a gap in
+        // this module's own registration, not in AvaloniaViewDomain.
+        //
+        // DockPageWindow, not the plain PageWindow MainPage uses: TestPage is also this session's
+        // real usage for InteractivePage.DetailPages -> ToolDock (see TestPage.cs and
+        // DockPageWindow's own "not live-verified" comment) - that wiring only exists on
+        // DockPageWindow, so TestPage needs to be hosted there to prove it for real.
+        AvaloniaViewDomain.RegisterPageWindowConstructor<TestPage>(() => new DockPageWindow());
 
         // TaskCard (Phase 5's real LookupComboBox usage) needs its own hand-built control -
         // Kapok.View.Avalonia's generic CardPageView is a deliberate "not implemented" placeholder
