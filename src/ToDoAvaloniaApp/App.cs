@@ -230,6 +230,7 @@ public class App : Application
                     ("Work", 0, false)
                 };
 
+                var seededCategoryCount = 0;
                 DataModel.TaskCategory? parentLevel0 = null;
                 DataModel.TaskCategory? parentLevel1 = null;
                 foreach (var (categoryName, level, hasChildren) in categories)
@@ -240,6 +241,7 @@ public class App : Application
                     category.Level = level;
                     category.HasChildren = hasChildren;
                     category.ParentId = level switch { 1 => parentLevel0?.Id, 2 => parentLevel1?.Id, _ => null };
+                    category.SortOrder = ++seededCategoryCount;
                     if (level == 0) parentLevel0 = category;
                     if (level == 1) parentLevel1 = category;
                 }
@@ -705,6 +707,75 @@ public class App : Application
             });
             Dispatcher.UIThread.RunJobs();
             Console.WriteLine($"KAPOK_PASTE: with CanUserPasteToNewRows=false rows={pasteDataSet.Collection.Count} (was {rowsBefore}) [{Tasks_()}]");
+        }
+
+        // Phase 7 item 6 verification: drag & drop row reordering. Exercised on TaskCategories,
+        // the one showcase entity implementing ISortableEntity (which is what makes the grid offer
+        // the drag at all). Two halves: the pointer gesture itself - press, move past the drag
+        // threshold, release - and the resulting collection order plus the SortOrder values written
+        // back onto the entities, since a reorder that is not persisted is not a reorder.
+        if (Environment.GetEnvironmentVariable("KAPOK_HEADLESS_SCREENSHOT_ROW_DRAG") == "1" &&
+            page is TaskCategories && lastOpenedWindow != null)
+        {
+            Dispatcher.UIThread.RunJobs();
+
+            var dragGrid = lastOpenedWindow.GetVisualDescendants().OfType<CustomDataGrid>().First();
+            var rows = dragGrid.ItemsSource!.Cast<DataModel.TaskCategory>().ToList();
+
+            string Order() => string.Join(", ", dragGrid.ItemsSource!.Cast<DataModel.TaskCategory>()
+                .Select(c => $"{c.Name}#{c.SortOrder}"));
+
+            Console.WriteLine($"KAPOK_ROW_DRAG: canUserReorderRows={dragGrid.CanUserReorderRows} before=[{Order()}]");
+
+            // The gesture. Directly-raised pointer events rather than AvaloniaHeadless's
+            // MouseDown/MouseMove/MouseUp - the proven-reliable pattern from Phase 5, whose
+            // simulated pointer input never reached targets nested inside DockPageWindow's
+            // Dock.Avalonia chrome.
+            var realizedRows = dragGrid.GetVisualDescendants().OfType<DataGridRow>().OrderBy(r => r.Bounds.Y).ToList();
+            var sourceRow = realizedRows.First(r => ((DataModel.TaskCategory)r.DataContext!).Name == "Work");
+            var targetRow = realizedRows.First(r => ((DataModel.TaskCategory)r.DataContext!).Name == "Home");
+
+            // Positions are given relative to the window, which is also what is passed as the
+            // event's root visual - PointerEventArgs.GetPosition translates from there, so a
+            // grid-relative point paired with the grid as root visual comes back skewed (seen
+            // during this item's verification: a press meant for a row landed at y=-45).
+            Point CentreOf(DataGridRow row) =>
+                row.TranslatePoint(new Point(row.Bounds.Width / 2, row.Bounds.Height / 2), lastOpenedWindow) ?? default;
+
+            var start = CentreOf(sourceRow);
+            var end = CentreOf(targetRow);
+
+            var pointer = new global::Avalonia.Input.Pointer(0, PointerType.Mouse, isPrimary: true);
+            var pressProperties = new PointerPointProperties(RawInputModifiers.LeftMouseButton, PointerUpdateKind.LeftButtonPressed);
+
+            sourceRow.RaiseEvent(new PointerPressedEventArgs(sourceRow, pointer, lastOpenedWindow, start,
+                0, pressProperties, KeyModifiers.None));
+            Console.WriteLine($"KAPOK_ROW_DRAG: after press draggedItem={(dragGrid.DraggedItem as DataModel.TaskCategory)?.Name}");
+
+            targetRow.RaiseEvent(new PointerEventArgs(InputElement.PointerMovedEvent, targetRow, pointer,
+                lastOpenedWindow, end, 0, pressProperties, KeyModifiers.None));
+            // The drag ghost's own rendering cannot be asserted here: opening any Popup inside this
+            // port's RibbonWindow fails under Avalonia.Headless (the limitation Phase 5 documented
+            // for LookupComboBox's dropdown), and CustomDataGrid deliberately swallows that so the
+            // reorder still works. What is checked is that the ghost was created and that the grid
+            // switched itself read-only for the duration of the drag.
+            Console.WriteLine($"KAPOK_ROW_DRAG: during drag dragPopupExists={dragGrid.DragPopup != null} gridReadOnly={dragGrid.IsReadOnly}");
+
+            targetRow.RaiseEvent(new PointerReleasedEventArgs(targetRow, pointer, lastOpenedWindow, end,
+                0, new PointerPointProperties(RawInputModifiers.None, PointerUpdateKind.LeftButtonReleased),
+                KeyModifiers.None, MouseButton.Left));
+
+            Dispatcher.UIThread.RunJobs();
+            Console.WriteLine($"KAPOK_ROW_DRAG: after drop draggedItem={(dragGrid.DraggedItem as DataModel.TaskCategory)?.Name ?? "<null>"} " +
+                              $"dragPopupExists={dragGrid.DragPopup != null} gridReadOnly={dragGrid.IsReadOnly} " +
+                              $"selected={(dragGrid.SelectedItem as DataModel.TaskCategory)?.Name}");
+            Console.WriteLine($"KAPOK_ROW_DRAG: after=[{Order()}]");
+
+            // And the operation on its own, so the reorder is verified independently of whatever
+            // headless pointer routing does.
+            dragGrid.MoveRow(rows.First(c => c.Name == "Groceries"), rows.First(c => c.Name == "Garden"));
+            Dispatcher.UIThread.RunJobs();
+            Console.WriteLine($"KAPOK_ROW_DRAG: after MoveRow(Groceries -> Garden)=[{Order()}]");
         }
 
         // Phase 5 verification: proves LookupComboBox's dropdown DataGrid actually renders real

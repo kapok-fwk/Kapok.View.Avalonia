@@ -6,13 +6,17 @@ using System.Linq.Expressions;
 using System.Windows.Input;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Controls.Templates;
 using Avalonia.Data;
 using Avalonia.Input;
 using Avalonia.Layout;
+using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Styling;
+using Avalonia.VisualTree;
 using Kapok.BusinessLayer;
+using Kapok.Entity;
 using Kapok.View.Avalonia.Helper;
 using Kapok.View.Avalonia.ValueConverter;
 
@@ -87,7 +91,290 @@ public class CustomDataGrid : DataGrid
 
         AutoGeneratingColumn += OnAutoGeneratingColumnApplyMetadata;
         SelectionChanged += OnSelectionChangedSyncSelectedEntries;
+
+        // Tunnel, not bubble: WPF used the Preview* mouse events so the drag could be recognised
+        // before the cell/row handled the press. Avalonia's equivalent is an explicitly registered
+        // tunnelling handler - overriding OnPointerPressed would only see presses the DataGrid's own
+        // row/cell handling did not already consume. The press handler deliberately does not mark
+        // the event handled, so normal selection still works, same as WPF.
+        AddHandler(PointerPressedEvent, OnPointerPressedStartRowDrag, RoutingStrategies.Tunnel);
+        AddHandler(PointerMovedEvent, OnPointerMovedDragRow, RoutingStrategies.Tunnel);
+        AddHandler(PointerReleasedEvent, OnPointerReleasedDropRow, RoutingStrategies.Tunnel);
     }
+
+    #region Drag & drop row reordering
+
+    /// <summary>
+    /// Whether rows can be reordered by dragging them.
+    ///
+    /// **Note on the WPF original**: its CustomDataGrid gated the whole feature on
+    /// <c>DragPopup != null</c>, and *nothing in Kapok.View.Wpf ever sets DragPopup* -
+    /// grep-confirmed across the whole module, including DataGridStyling.xaml. So
+    /// <c>OnMouseLeftButtonDown_DragDropRow</c> always returned on its first line and row
+    /// drag-and-drop could never actually run there: dead code, the same finding Phase 5 made about
+    /// <c>FlatComboBoxStyle.xaml</c> and item 3 made about <c>FilterType.cs</c>. It is ported here
+    /// as a working feature rather than a dead one, with an explicit opt-in property instead of
+    /// "did someone remember to assign a popup".
+    /// </summary>
+    public static readonly StyledProperty<bool> CanUserReorderRowsProperty =
+        AvaloniaProperty.Register<CustomDataGrid, bool>(nameof(CanUserReorderRows));
+
+    public bool CanUserReorderRows
+    {
+        get => GetValue(CanUserReorderRowsProperty);
+        set => SetValue(CanUserReorderRowsProperty, value);
+    }
+
+    /// <summary>The row currently being dragged, or null. Same role as WPF's DraggedItem.</summary>
+    public static readonly StyledProperty<object?> DraggedItemProperty =
+        AvaloniaProperty.Register<CustomDataGrid, object?>(nameof(DraggedItem));
+
+    public object? DraggedItem
+    {
+        get => GetValue(DraggedItemProperty);
+        set => SetValue(DraggedItemProperty, value);
+    }
+
+    /// <summary>
+    /// The "ghost" shown under the pointer while a row is being dragged. Optional here - the grid
+    /// builds a default one on first use if the host did not supply it, which is what stops this
+    /// feature from being unreachable the way WPF's was.
+    /// </summary>
+    public static readonly StyledProperty<Popup?> DragPopupProperty =
+        AvaloniaProperty.Register<CustomDataGrid, Popup?>(nameof(DragPopup));
+
+    public Popup? DragPopup
+    {
+        get => GetValue(DragPopupProperty);
+        set => SetValue(DragPopupProperty, value);
+    }
+
+    private bool _isDraggingRow;
+    private bool _dragPopupUnavailable;
+    private bool _temporaryDragDropIsReadOnly;
+    private object? _dropTargetItem;
+    private Point _dragStartPoint;
+
+    /// <summary>Pointer distance before a press turns into a row drag rather than a click.</summary>
+    private const double DragThreshold = 4;
+
+    private void OnPointerPressedStartRowDrag(object? sender, PointerPressedEventArgs e)
+    {
+        if (!CanUserReorderRows || !e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
+            return;
+
+        // WPF additionally bailed out when ItemsSource was not an IList; here that is checked at
+        // drop time instead (MoveRow), so a grid over a read-only sequence simply never completes a
+        // drag rather than behaving differently on press.
+        var row = FindRow(e);
+        if (row?.DataContext == null)
+            return;
+
+        _isDraggingRow = true;
+        _dragStartPoint = e.GetPosition(this);
+        SetCurrentValue(DraggedItemProperty, row.DataContext);
+    }
+
+    private void OnPointerMovedDragRow(object? sender, PointerEventArgs e)
+    {
+        if (!_isDraggingRow || !e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
+            return;
+
+        var position = e.GetPosition(this);
+
+        // A plain click must not start a reorder. WPF had no threshold because its feature never
+        // ran at all; without one, every click would flip the grid into read-only mode and pop up a
+        // drag ghost.
+        if (Math.Abs(position.X - _dragStartPoint.X) < DragThreshold &&
+            Math.Abs(position.Y - _dragStartPoint.Y) < DragThreshold)
+            return;
+
+        var popup = DragPopup ??= BuildDefaultDragPopup();
+
+        if (!popup.IsOpen)
+        {
+            // Switch to read-only while dragging, exactly as WPF did - a drag must not start a cell
+            // edit on the way past.
+            if (!IsReadOnly)
+            {
+                _temporaryDragDropIsReadOnly = true;
+                SetCurrentValue(IsReadOnlyProperty, true);
+            }
+
+            popup.PlacementTarget = this;
+
+            try
+            {
+                popup.IsOpen = true;
+            }
+            catch (InvalidOperationException)
+            {
+                // "Unable to create IPopupImpl and no overlay layer is found for the target
+                // control" - the same limitation Phase 5 documented for LookupComboBox's dropdown:
+                // AvaloniaControls.Ribbon.Desktop.Flowery's Window template has no popup overlay
+                // layer, and a real desktop backend never takes that path because it can always
+                // create a native popup window. The ghost is decoration; a drag must not be
+                // abandoned because it could not be shown, so this is swallowed and the reorder
+                // carries on.
+                //
+                // Note IsOpen still reads true afterwards - Popup sets the property first and only
+                // then fails to create the platform impl - which is why the offsets below are
+                // guarded by this flag rather than by IsOpen.
+                _dragPopupUnavailable = true;
+            }
+        }
+
+        if (!_dragPopupUnavailable)
+        {
+            popup.HorizontalOffset = position.X;
+            popup.VerticalOffset = position.Y;
+        }
+
+        _dropTargetItem = FindRow(e)?.DataContext;
+    }
+
+    private void OnPointerReleasedDropRow(object? sender, PointerReleasedEventArgs e)
+    {
+        if (!_isDraggingRow)
+            return;
+
+        var draggedItem = DraggedItem;
+        var targetItem = _dropTargetItem;
+
+        ResetRowDrag();
+
+        if (draggedItem != null && targetItem != null && !ReferenceEquals(draggedItem, targetItem))
+            MoveRow(draggedItem, targetItem);
+    }
+
+    private void ResetRowDrag()
+    {
+        _isDraggingRow = false;
+        _dropTargetItem = null;
+        SetCurrentValue(DraggedItemProperty, null);
+
+        if (DragPopup != null)
+        {
+            try
+            {
+                DragPopup.IsOpen = false;
+            }
+            catch (InvalidOperationException)
+            {
+                // See the matching catch when opening it.
+            }
+        }
+
+        _dragPopupUnavailable = false;
+
+        if (_temporaryDragDropIsReadOnly)
+        {
+            SetCurrentValue(IsReadOnlyProperty, false);
+            _temporaryDragDropIsReadOnly = false;
+        }
+    }
+
+    /// <summary>
+    /// Moves <paramref name="draggedItem"/> to <paramref name="targetItem"/>'s position. Public so
+    /// the drop can be driven (and verified) without simulating a pointer drag.
+    /// </summary>
+    /// <returns><c>true</c> when the collection was actually reordered.</returns>
+    public bool MoveRow(object draggedItem, object targetItem)
+    {
+        if (ItemsSource is not IList list)
+            return false;
+
+        var targetIndex = list.IndexOf(targetItem);
+        var oldIndex = list.IndexOf(draggedItem);
+        if (targetIndex < 0 || oldIndex < 0 || targetIndex == oldIndex)
+            return false;
+
+        // ObservableCollection<T>.Move is the non-destructive path (one Move notification rather
+        // than a Remove+Insert pair), and is what WPF reached for too - via reflection, because it
+        // only had the non-generic IList. Same here, for the same reason.
+        var moveMethod = list.GetType().GetMethod("Move", new[] { typeof(int), typeof(int) });
+        if (moveMethod != null)
+        {
+            moveMethod.Invoke(list, new object[] { oldIndex, targetIndex });
+        }
+        else
+        {
+            list.RemoveAt(oldIndex);
+            list.Insert(targetIndex, draggedItem);
+        }
+
+        SetCurrentValue(SelectedItemProperty, draggedItem);
+
+        RenumberSortOrder(list);
+        return true;
+    }
+
+    /// <summary>
+    /// Writes the new visual order back onto the entities when they carry one.
+    ///
+    /// WPF stopped at moving the item inside the collection, which is a purely client-side shuffle
+    /// that any Refresh() throws away. Kapok already has the concept for a persisted order -
+    /// <see cref="ISortableEntity"/>, the same interface <c>ListPage&lt;TEntry&gt;</c> uses to
+    /// decide whether to offer its SortUp/SortDown actions at all, and which
+    /// <c>SortableDataSetView.SortUp</c> maintains by rewriting SortOrder - so a drag-drop reorder
+    /// maintains it the same way. For an entity without it the move stays client-side, exactly as
+    /// in WPF.
+    /// </summary>
+    private static void RenumberSortOrder(IList list)
+    {
+        if (list.Count == 0 || list[0] is not ISortableEntity)
+            return;
+
+        for (var i = 0; i < list.Count; i++)
+        {
+            if (list[i] is ISortableEntity sortable)
+                sortable.SortOrder = i + 1;
+        }
+    }
+
+    /// <summary>
+    /// The row a pointer event happened over.
+    ///
+    /// The routed event's own Source is the primary answer - it is the cell/row the input system
+    /// already resolved, and it is what WPF's <c>FindFromPoint</c> hit test was approximating. The
+    /// geometric hit test is only a fallback for events raised without a meaningful source; note it
+    /// returns null under Avalonia.Headless (confirmed here: a correctly-positioned press hit-tested
+    /// to nothing), which is another reason not to depend on it.
+    /// </summary>
+    private DataGridRow? FindRow(PointerEventArgs e)
+        => (e.Source as Visual)?.GetSelfAndVisualAncestors().OfType<DataGridRow>().FirstOrDefault()
+           ?? FindRowAt(e.GetPosition(this));
+
+    private DataGridRow? FindRowAt(Point position)
+        => (this.InputHitTest(position) as Visual)?
+            .GetSelfAndVisualAncestors()
+            .OfType<DataGridRow>()
+            .FirstOrDefault();
+
+    /// <summary>
+    /// The default drag ghost: a small bordered label showing the dragged row. WPF expected the
+    /// host to provide one and no host ever did (see <see cref="CanUserReorderRows"/>).
+    /// </summary>
+    private Popup BuildDefaultDragPopup()
+    {
+        var text = new TextBlock { Margin = new Thickness(6, 3), VerticalAlignment = VerticalAlignment.Center };
+        text.Bind(TextBlock.TextProperty, new Binding(nameof(DraggedItem)) { Source = this });
+
+        return new Popup
+        {
+            IsLightDismissEnabled = false,
+            Placement = PlacementMode.TopEdgeAlignedLeft,
+            Child = new Border
+            {
+                Background = new SolidColorBrush(Color.FromArgb(230, 250, 250, 250)),
+                BorderBrush = Brushes.Gray,
+                BorderThickness = new Thickness(1),
+                Child = text
+            }
+        };
+    }
+
+    #endregion
 
     #region Clipboard paste
 

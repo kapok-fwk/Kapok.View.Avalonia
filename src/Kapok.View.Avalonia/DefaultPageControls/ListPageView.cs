@@ -93,6 +93,14 @@ public class ListPageView : UserControl
                 Converter = new InverseBooleanConverter()
             });
 
+        // Drag & drop row reordering (item 6), offered only for entities that carry an explicit
+        // order. ISortableEntity is the same gate core Kapok uses to decide whether a list page
+        // even offers its SortUp/SortDown actions (see ListPage<TEntry>'s constructor), and it is
+        // what lets a drop write the new order back onto the entities instead of being a
+        // client-side shuffle that the next Refresh() discards.
+        var entryType = readonlyGenericInterface.GetGenericArguments()[0];
+        _dataGrid.CanUserReorderRows = typeof(Kapok.Entity.ISortableEntity).IsAssignableFrom(entryType);
+
         // Excel-style paste (item 5). CanUserPasteToNewRows follows DataSet.InsertAllowed, exactly
         // as WPF's TableDataDataGrid style bound it, and new rows are created through the DataSet's
         // own CreateNewEntryAction - the same business-layer path the "New" button takes, rather

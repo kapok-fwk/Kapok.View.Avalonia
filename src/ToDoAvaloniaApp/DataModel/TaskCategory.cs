@@ -14,7 +14,7 @@ namespace ToDoAvaloniaApp.DataModel;
 /// reading the code.
 /// </summary>
 [Display(Name = "Task category")]
-public class TaskCategory : EditableEntityBase, IHierarchyEntry<TaskCategory>
+public class TaskCategory : EditableEntityBase, IHierarchyEntry<TaskCategory>, ISortableEntity
 {
     // Client-generated - see TaskList.Id's comment on why an all-zero Guid primary key breaks row
     // identity in the DataGrid.
@@ -25,6 +25,7 @@ public class TaskCategory : EditableEntityBase, IHierarchyEntry<TaskCategory>
     private bool _isExpanded = true;
     private bool _isVisible = true;
     private bool _hasChildren;
+    private int _sortOrder;
 
     [Key]
     [Display(Name = nameof(Id))]
@@ -50,6 +51,19 @@ public class TaskCategory : EditableEntityBase, IHierarchyEntry<TaskCategory>
     {
         get => _parentId;
         set => SetValidateProperty(ref _parentId, value);
+    }
+
+    /// <summary>
+    /// Explicit display order. Implementing <see cref="ISortableEntity"/> is what makes this entity
+    /// reorderable by dragging rows (Phase 7 item 6) - the grid offers the drag only for entities
+    /// that have somewhere to persist the new order, and writes SortOrder back after a drop, the
+    /// same field SortableDataSetView.SortUp/SortDown maintain.
+    /// </summary>
+    [Display(Name = "Order")]
+    public int SortOrder
+    {
+        get => _sortOrder;
+        set => SetValidateProperty(ref _sortOrder, value);
     }
 
     #region IHierarchyEntry<TaskCategory>
