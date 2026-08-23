@@ -1,7 +1,12 @@
 using System.Collections;
+using System.Collections.Specialized;
+using System.ComponentModel;
+using System.Globalization;
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Data;
 using Avalonia.Input;
+using Avalonia.Layout;
 using Avalonia.Markup.Xaml.Styling;
 using Kapok.View.Avalonia.Controls;
 using Kapok.View.Avalonia.Data;
@@ -23,7 +28,18 @@ namespace Kapok.View.Avalonia.DefaultPageControls;
 ///
 /// WPF's ListPageControl.xaml also has its own small toolbar here (sort-ascending/descending,
 /// list-view selector, filter toggle) - those are DataSet-level, grid-specific controls
-/// (DataSet.SortAscendingAction etc.), not the page's Base menu; still deferred.
+/// (DataSet.SortAscendingAction etc.), not the page's Base menu. Phase 8 item 6 built the first
+/// two (see BuildToolbar/Rebuild). The "edit filter" toggle is deliberately still deferred, not
+/// silently dropped: WPF's Data/FilterSetView.cs is a genuinely substantial (~330 line) view model
+/// - a whole second filter-editing UX (a filterable-property picker plus an editable list of
+/// active filters) built on its own WPF-ICollectionView-wrapping helper,
+/// Data/QueryableCollectionViewSource.cs, which has no Avalonia equivalent to build on (the same
+/// gap Phase 8 item 4 already ran into for hierarchy navigation - see
+/// AvaloniaHierarchyDataSetView's own header comment). Porting both would be its own workstream,
+/// and the value is materially smaller here than it was for hierarchy navigation: Phase 7 item 3
+/// already gave this port a real, working per-column inline filter row covering the same end-user
+/// need (typing a filter expression per column), so this toggle would mostly duplicate existing
+/// functionality in a different, WPF-shaped UI rather than add a missing capability.
 ///
 /// DataSet.Collection is exposed only via the closed generic IDataSetReadonlyView&lt;TEntry&gt;
 /// interface (DataSetView&lt;TEntry&gt; implements it as an explicit interface member on a protected
@@ -35,6 +51,12 @@ namespace Kapok.View.Avalonia.DefaultPageControls;
 public class ListPageView : UserControl
 {
     private readonly CustomDataGrid _dataGrid;
+    private readonly Button _sortAscendingButton;
+    private readonly Button _sortDescendingButton;
+    private readonly Button _listViewButton;
+    private readonly TextBlock _listViewButtonText;
+    private readonly MenuFlyout _listViewFlyout;
+    private INotifyCollectionChanged? _observedListViews;
 
     public ListPageView()
     {
@@ -57,9 +79,85 @@ public class ListPageView : UserControl
             // not an optional extra.
             SelectionMode = DataGridSelectionMode.Extended
         };
-        Content = _dataGrid;
+
+        (_sortAscendingButton, _sortDescendingButton, _listViewButton, _listViewButtonText, _listViewFlyout)
+            = BuildToolbar();
+
+        var toolbar = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Margin = new Thickness(5, 2),
+            Spacing = 2,
+            Children = { _sortAscendingButton, _sortDescendingButton, _listViewButton }
+        };
+
+        var layout = new Grid { RowDefinitions = new RowDefinitions("Auto,*") };
+        layout.Children.Add(toolbar);
+        Grid.SetRow(_dataGrid, 1);
+        layout.Children.Add(_dataGrid);
+        Content = layout;
 
         AttachedToVisualTree += (_, _) => Rebuild();
+    }
+
+    /// <summary>
+    /// Sort-ascending/descending buttons and the list-view selector - matches WPF's
+    /// ListPageControl.xaml ToolBar. Built once here (icons/flyout structure don't depend on the
+    /// page), wired to the actual DataSet/page in <see cref="Rebuild"/> since that's the first
+    /// point either is known.
+    /// </summary>
+    private static (Button SortAscending, Button SortDescending, Button ListView, TextBlock ListViewText, MenuFlyout ListViewFlyout) BuildToolbar()
+    {
+        Button IconButton(string imageName, string name) => new()
+        {
+            Name = name,
+            Content = new Image
+            {
+                Width = 16,
+                Height = 16,
+                [!Image.SourceProperty] = new Binding
+                {
+                    Source = imageName,
+                    Converter = new ImageNameToImageSourceConverter(),
+                    ConverterParameter = "Small"
+                }
+            },
+            Padding = new Thickness(4)
+        };
+
+        var sortAscending = IconButton("sort-az", "SortAscendingButton");
+        var sortDescending = IconButton("sort-za", "SortDescendingButton");
+
+        var listViewText = new TextBlock { VerticalAlignment = VerticalAlignment.Center };
+        var listViewFlyout = new MenuFlyout();
+        var listViewButton = new Button
+        {
+            Name = "ListViewButton",
+            Content = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Spacing = 4,
+                Children =
+                {
+                    new Image
+                    {
+                        Width = 16,
+                        Height = 16,
+                        [!Image.SourceProperty] = new Binding
+                        {
+                            Source = "view-details",
+                            Converter = new ImageNameToImageSourceConverter(),
+                            ConverterParameter = "Small"
+                        }
+                    },
+                    listViewText
+                }
+            },
+            Flyout = listViewFlyout,
+            Padding = new Thickness(4)
+        };
+
+        return (sortAscending, sortDescending, listViewButton, listViewText, listViewFlyout);
     }
 
     private void Rebuild()
@@ -70,6 +168,44 @@ public class ListPageView : UserControl
         var dataSet = dataPage.DataSet;
         if (dataSet == null)
             return;
+
+        // Sort-ascending/descending buttons: WPF bound their Visibility to DataSet.CanUserSort
+        // and their Command straight to DataSet.SortAscendingAction/SortDescendingAction - both
+        // already fully functional on the core DataSetView (Load() sorts by SortBy/SortDirection),
+        // just never reachable from any UI in this port until now.
+        _sortAscendingButton.Command = dataSet.SortAscendingAction != null ? new ActionCommand(dataSet.SortAscendingAction) : null;
+        _sortDescendingButton.Command = dataSet.SortDescendingAction != null ? new ActionCommand(dataSet.SortDescendingAction) : null;
+        _sortAscendingButton.Bind(IsVisibleProperty, new Binding(nameof(IDataSetReadonlyView.CanUserSort)) { Source = dataSet, Mode = BindingMode.OneWay });
+        _sortDescendingButton.Bind(IsVisibleProperty, new Binding(nameof(IDataSetReadonlyView.CanUserSort)) { Source = dataSet, Mode = BindingMode.OneWay });
+
+        // List-view selector menu: matches WPF's MenuItem whose Header shows the current view's
+        // caption and whose ItemsSource is DataSet.ListViews, each item's Command running its own
+        // SelectAction (ListPage<TEntry>.ListViews_CollectionChanged wires that up already - see
+        // its own comment). IListPage exposes both without needing reflection, unlike most of the
+        // rest of this method (ListViews/CurrentListView were only added to the interface after
+        // Phase 4's baseline was written).
+        if (dataPage is IListPage listPage)
+        {
+            _listViewButton.IsVisible = true;
+            _listViewButtonText.Bind(TextBlock.TextProperty, new Binding($"{nameof(IListPage.CurrentListView)}.{nameof(IDataSetListView.DisplayName)}")
+            {
+                Source = listPage,
+                Converter = new CaptionConverter(),
+                FallbackValue = "Standard view"
+            });
+
+            if (_observedListViews != null)
+                _observedListViews.CollectionChanged -= ListViews_CollectionChanged;
+            _observedListViews = listPage.ListViews as INotifyCollectionChanged;
+            if (_observedListViews != null)
+                _observedListViews.CollectionChanged += ListViews_CollectionChanged;
+
+            RebuildListViewMenu(listPage);
+        }
+        else
+        {
+            _listViewButton.IsVisible = false;
+        }
 
         var readonlyGenericInterface = dataSet.GetType().GetInterfaces()
             .FirstOrDefault(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IDataSetReadonlyView<>));
@@ -208,6 +344,36 @@ public class ListPageView : UserControl
                 Gesture = new KeyGesture(Key.A, KeyModifiers.Control),
                 Command = new ActionCommand(selectAllAction)
             });
+        }
+    }
+
+    private void ListViews_CollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        if (DataContext is IListPage listPage)
+            RebuildListViewMenu(listPage);
+    }
+
+    /// <summary>
+    /// Populates the list-view selector's flyout with one real MenuItem per
+    /// <see cref="IDataSetListView"/>, each running its own SelectAction on click - built directly
+    /// in code rather than through MenuItem.ItemsSource/an item template, since every other
+    /// Kapok-specific piece of UI in this port already favours direct control construction over
+    /// Avalonia's (less-verified-here) implicit item-container generation for small, rarely-
+    /// changing lists like this one.
+    /// </summary>
+    private void RebuildListViewMenu(IListPage listPage)
+    {
+        _listViewFlyout.Items.Clear();
+
+        foreach (var view in listPage.ListViews)
+        {
+            var menuItem = new MenuItem
+            {
+                Header = view.DisplayName?.LanguageOrDefault(CultureInfo.CurrentUICulture) ?? view.Name ?? view.ToString()
+            };
+            if (view.SelectAction != null)
+                menuItem.Command = new ActionCommand(view.SelectAction);
+            _listViewFlyout.Items.Add(menuItem);
         }
     }
 }

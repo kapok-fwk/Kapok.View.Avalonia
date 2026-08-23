@@ -1050,6 +1050,74 @@ public class App : Application
                               $"entry={((activatedPage as IDataPage)?.DataSet?.Current as DataModel.Task)?.Name}");
         }
 
+        // Phase 8 item 6 verification: ListPageView's own toolbar (sort ascending/descending,
+        // list-view selector) - real UI wired to DataSet.SortAscendingAction/SortDescendingAction
+        // and the page's own ListViews/CurrentListView, none of which had any UI to reach them
+        // before this. Finds the real Button controls ListPageView built (by Name, see
+        // ListPageView.BuildToolbar) and drives them exactly like a user would - Command.Execute(),
+        // not the underlying DataSet action directly - so this proves the *wiring*, not just that
+        // the already-known-working actions still work on their own.
+        if (Environment.GetEnvironmentVariable("KAPOK_HEADLESS_SCREENSHOT_LIST_TOOLBAR") == "1" &&
+            page is Tasks toolbarPage && toolbarPage.DataSet is { } toolbarDataSet)
+        {
+            foreach (var taskName in new[] { "Charlie", "Alpha", "Bravo" })
+            {
+                toolbarDataSet.CreateNewEntryAction.Execute();
+                toolbarDataSet.Current!.Name = taskName;
+            }
+            // SortAscendingAction/SortDescendingAction and the list-view selector both call
+            // DataSet.Refresh() (see DataSetView<TEntry>.SortAscending/ListPage.OnCurrentListViewChanged),
+            // a real server-side re-query - saved first so the seeded rows still exist afterward,
+            // and specifically to avoid the already-documented EntityDeferredCommitService deadlock
+            // (a Load/Refresh against a DataSet holding an uncommitted entity with an FK navigation
+            // property - see this file's own KAPOK_HEADLESS_SCREENSHOT_LIST_VIEW comment) that an
+            // unsaved Task (it has a TaskListId FK) would otherwise hit here.
+            toolbarDataSet.Save();
+            Dispatcher.UIThread.RunJobs();
+
+            string Rows() => string.Join(", ", toolbarDataSet.Collection.Select(t => t.Name));
+
+            var sortAscendingButton = lastOpenedWindow!.GetVisualDescendants().OfType<Button>()
+                .FirstOrDefault(b => b.Name == "SortAscendingButton");
+            var sortDescendingButton = lastOpenedWindow.GetVisualDescendants().OfType<Button>()
+                .FirstOrDefault(b => b.Name == "SortDescendingButton");
+            var listViewButton = lastOpenedWindow.GetVisualDescendants().OfType<Button>()
+                .FirstOrDefault(b => b.Name == "ListViewButton");
+
+            Console.WriteLine($"KAPOK_LIST_TOOLBAR: canUserSort={toolbarDataSet.CanUserSort} " +
+                              $"sortAscendingFound={sortAscendingButton != null} isVisible={sortAscendingButton?.IsVisible} " +
+                              $"sortDescendingFound={sortDescendingButton != null} isVisible={sortDescendingButton?.IsVisible} " +
+                              $"listViewFound={listViewButton != null}");
+            Console.WriteLine($"KAPOK_LIST_TOOLBAR: before sorting=[{Rows()}]");
+
+            sortAscendingButton?.Command?.Execute(null);
+            Dispatcher.UIThread.RunJobs();
+            Console.WriteLine($"KAPOK_LIST_TOOLBAR: after clicking sort-ascending=[{Rows()}] " +
+                              $"sortDirection={toolbarDataSet.SortDirection}");
+
+            sortDescendingButton?.Command?.Execute(null);
+            Dispatcher.UIThread.RunJobs();
+            Console.WriteLine($"KAPOK_LIST_TOOLBAR: after clicking sort-descending=[{Rows()}] " +
+                              $"sortDirection={toolbarDataSet.SortDirection}");
+
+            var listPageView = lastOpenedWindow.GetVisualDescendants()
+                .OfType<Kapok.View.Avalonia.DefaultPageControls.ListPageView>().FirstOrDefault();
+            var flyout = (listViewButton?.Flyout as global::Avalonia.Controls.MenuFlyout);
+            var menuItems = flyout?.Items.OfType<MenuItem>().ToList();
+            Console.WriteLine($"KAPOK_LIST_TOOLBAR: listPageViewFound={listPageView != null} " +
+                              $"menuItemCount={menuItems?.Count} " +
+                              $"menuItemHeaders=[{string.Join(", ", menuItems?.Select(m => m.Header) ?? [])}] " +
+                              $"currentListView={toolbarPage.CurrentListView?.Name}");
+
+            var withDueDateItem = menuItems?.FirstOrDefault(m => m.Header?.ToString() == "With due date");
+            Console.WriteLine($"KAPOK_LIST_TOOLBAR: 'With due date' menuItem found={withDueDateItem != null} " +
+                              $"canExecute={withDueDateItem?.Command?.CanExecute(null)}");
+            withDueDateItem?.Command?.Execute(null);
+            Dispatcher.UIThread.RunJobs();
+            Console.WriteLine($"KAPOK_LIST_TOOLBAR: after selecting 'With due date' currentListView={toolbarPage.CurrentListView?.Name} " +
+                              $"columns=[{string.Join(", ", toolbarDataSet.Columns.Select(c => c.Name))}]");
+        }
+
         // Phase 5 verification: proves LookupComboBox's dropdown DataGrid actually renders real
         // lookup rows, not just that the (closed) combo box exists. Opens the dropdown on
         // whichever LookupComboBox is in the just-shown window's visual tree, after the seed
