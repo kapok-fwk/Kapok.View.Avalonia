@@ -71,6 +71,73 @@ jobs:
         path: ./out/*.nupkg
       if: ${{ matrix.is_release }}
 
+  # Closes this port's oldest open verification gap: everything up to this point (build, unit
+  # tests, the Debug/Release matrix above) only ever compiles on ubuntu-latest - nothing has ever
+  # actually *run* the app anywhere but headless macOS (this project's dev machine). ToDoAvaloniaApp's
+  # headless harness (Avalonia.Headless + Skia *software* rendering, see Program.cs) needs no
+  # display, so it can run as a real smoke test in CI instead of just a local dev tool. Kept as a
+  # separate job (not folded into the matrix above) since it verifies runtime behaviour, not build
+  # output, and only needs one OS/configuration to do that - ubuntu-latest/Debug, the same
+  # combination `dotnet test` above already uses.
+  headless-verification:
+    runs-on: ubuntu-latest
+
+    env:
+      Solution_Name: Kapok.View.Avalonia.sln
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: 8.0.x
+
+    - name: Add Kapok package source
+      run: dotnet nuget add source --username leo-schick --password ${{ secrets.GITHUB_TOKEN }} --store-password-in-clear-text --name kapok-fwk "https://nuget.pkg.github.com/kapok-fwk/index.json"
+
+    - name: Restore dependencies
+      run: dotnet restore $Solution_Name
+
+    - name: Build solution (Debug)
+      run: dotnet build $Solution_Name --no-restore -c Debug
+
+    # SkiaSharp's Linux native library links fontconfig/freetype unconditionally (unlike macOS,
+    # where it uses CoreText) - without libfontconfig1 present, UseHeadless(UseHeadlessDrawing:
+    # false) fails to produce real pixels at all, not just falls back to a placeholder glyph.
+    # ToDoAvaloniaApp itself only ever renders through WithInterFont()'s embedded Inter font, but
+    # fontconfig's font-matching machinery still needs at least one real system font available to
+    # initialize cleanly - fonts-dejavu-core is the standard minimal fallback for that on Debian/
+    # Ubuntu. libicu-dev covers .NET's own globalization (CultureInfo.CurrentUICulture etc., used
+    # by the localization scenarios elsewhere in this harness) - GitHub's ubuntu-latest image
+    # usually already has an ICU package preinstalled for other tooling, but this makes the
+    # dependency explicit rather than relying on that as an accident of the runner image.
+    - name: Install font/locale dependencies for headless Skia rendering
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends libfontconfig1 fontconfig fonts-dejavu-core libicu-dev
+
+    # Runs every KAPOK_HEADLESS_SCREENSHOT_* scenario this port's verification harness supports
+    # (see .github/scripts/run-headless-verification.sh for the full list and each scenario's
+    # required env vars) as a real, non-macOS smoke test - not just "it compiles on Linux" but
+    # "the pages actually render, seed data, and respond to simulated input on Linux". The script
+    # itself was already run locally on macOS (this port's known-good baseline) to confirm its
+    # scenario list and env vars are correct independently of anything Linux-specific; what this
+    # step adds is the platform itself.
+    - name: Run headless verification scenarios
+      run: bash .github/scripts/run-headless-verification.sh "$GITHUB_WORKSPACE/artifacts/headless"
+
+    - name: Upload headless verification artifacts
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: headless-verification-linux
+        path: artifacts/headless/
+        if-no-files-found: warn
+
   publish:
     needs: build
 
