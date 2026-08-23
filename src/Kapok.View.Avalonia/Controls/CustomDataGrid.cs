@@ -859,7 +859,7 @@ public class CustomDataGrid : DataGrid
     /// rather than throwing: a paste covering several columns must not be aborted halfway by one
     /// bad cell.
     /// </summary>
-    private static bool TryConvert(object? value, Type targetType, out object? converted)
+    internal static bool TryConvert(object? value, Type targetType, out object? converted)
     {
         converted = null;
 
