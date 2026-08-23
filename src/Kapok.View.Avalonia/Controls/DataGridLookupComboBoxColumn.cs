@@ -61,6 +61,13 @@ public class DataGridLookupComboBoxColumn : DataGridTemplateColumn
     public Func<IEnumerable?>? ItemsSourceProvider { get; set; }
 
     /// <summary>
+    /// Called with each editor as it is created, so the owning grid can hook it up (it is used to
+    /// pause Excel navigation while the dropdown is open). A callback rather than a back-reference
+    /// to the grid, so the column stays independent of it.
+    /// </summary>
+    public Action<ComboBox>? OnEditorCreated { get; set; }
+
+    /// <summary>
     /// Builds both templates. Called once the properties above are set, since a
     /// DataGridTemplateColumn's templates are plain values, not virtual members.
     /// </summary>
@@ -102,6 +109,7 @@ public class DataGridLookupComboBoxColumn : DataGridTemplateColumn
                 HorizontalAlignment = HorizontalAlignment.Stretch
             };
             comboBox.Bind(ComboBox.SelectedValueProperty, new Binding(propertyPath) { Mode = BindingMode.TwoWay });
+            OnEditorCreated?.Invoke(comboBox);
             return comboBox;
         }, supportsRecycling: false);
     }
@@ -148,8 +156,12 @@ internal sealed class LookupDisplayConverter : IValueConverter
         if (value == null || string.IsNullOrEmpty(_selectedValuePath))
             return null;
 
-        // First real cell render is what triggers the lookup query - see ItemsSourceProvider.
-        _items ??= _itemsProvider?.Invoke();
+        // First real cell render is what triggers the lookup query - see ItemsSourceProvider. Not
+        // cached once it is non-empty only: the provider itself retries an empty result, and
+        // caching an empty list here would defeat that.
+        if (_items == null || !_items.Cast<object>().Any())
+            _items = _itemsProvider?.Invoke();
+
         if (_items == null)
             return value.ToString();
 

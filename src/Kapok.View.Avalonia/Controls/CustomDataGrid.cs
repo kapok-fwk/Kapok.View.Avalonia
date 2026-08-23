@@ -100,7 +100,191 @@ public class CustomDataGrid : DataGrid
         AddHandler(PointerPressedEvent, OnPointerPressedStartRowDrag, RoutingStrategies.Tunnel);
         AddHandler(PointerMovedEvent, OnPointerMovedDragRow, RoutingStrategies.Tunnel);
         AddHandler(PointerReleasedEvent, OnPointerReleasedDropRow, RoutingStrategies.Tunnel);
+
+        PreparingCellForEdit += OnPreparingCellForEditTrackEditing;
+        CellEditEnded += OnCellEditEndedTrackEditing;
+        CurrentCellChanged += OnCurrentCellChangedBeginEdit;
     }
+
+    #region Excel-style cell navigation
+
+    /// <summary>
+    /// Suspends the Excel-style key handling below. Set while a cell's own dropdown is open, so the
+    /// dropdown gets the arrow/Enter keys instead of the grid - WPF bound this to each combo box
+    /// column's <c>IsDropDownOpen</c>, and the enum/lookup columns generated here do the same.
+    /// </summary>
+    public static readonly StyledProperty<bool> PauseExcelNavigationProperty =
+        AvaloniaProperty.Register<CustomDataGrid, bool>(nameof(PauseExcelNavigation));
+
+    public bool PauseExcelNavigation
+    {
+        get => GetValue(PauseExcelNavigationProperty);
+        set => SetValue(PauseExcelNavigationProperty, value);
+    }
+
+    /// <summary>
+    /// Whether a cell editor is currently open. Avalonia's DataGrid exposes no <c>IsEditing</c>
+    /// (WPF had an extension method over its own editing state), so it is tracked from the two
+    /// lifecycle events that bracket an edit.
+    /// </summary>
+    private bool _isEditingCell;
+
+    private void OnPreparingCellForEditTrackEditing(object? sender, DataGridPreparingCellForEditEventArgs e)
+        => _isEditingCell = true;
+
+    private void OnCellEditEndedTrackEditing(object? sender, DataGridCellEditEndedEventArgs e)
+        => _isEditingCell = false;
+
+    /// <summary>
+    /// Whether making a cell current also starts editing it, so a list behaves like a spreadsheet
+    /// (select a cell and type). Port of WPF's OnSelectedCellsChanged_ExcelNavigation - **opt-in
+    /// here, where WPF had it permanently on.**
+    ///
+    /// The reason is a real behavioural difference, not caution: WPF guarded it with
+    /// "exactly one cell was newly added to the selection in *this* change"
+    /// (<c>e.AddedCells.Count == 1</c> on SelectedCellsChanged), which Avalonia's
+    /// <c>CurrentCellChanged</c> - an EventArgs.Empty notification - gives no way to reproduce. The
+    /// current cell legitimately changes for plenty of non-interactive reasons in this port -
+    /// <c>DataSet.SelectAllAction</c>, a paste walking rows, the SelectedEntries sync applying a
+    /// list one entry at a time - and each of those would silently open a cell editor, on a row the
+    /// user never touched, with the entity's value already selected and one keystroke from being
+    /// overwritten. Rather than guess at which changes were user-driven, an application that wants
+    /// the spreadsheet feel asks for it. Everything else in this region (Enter/Up/Down,
+    /// PauseExcelNavigation) is key-driven and therefore always on, exactly as in WPF.
+    /// </summary>
+    public static readonly StyledProperty<bool> AutoBeginEditOnCurrentCellProperty =
+        AvaloniaProperty.Register<CustomDataGrid, bool>(nameof(AutoBeginEditOnCurrentCell));
+
+    public bool AutoBeginEditOnCurrentCell
+    {
+        get => GetValue(AutoBeginEditOnCurrentCellProperty);
+        set => SetValue(AutoBeginEditOnCurrentCellProperty, value);
+    }
+
+    private void OnCurrentCellChangedBeginEdit(object? sender, EventArgs e)
+    {
+        if (!AutoBeginEditOnCurrentCell || IsReadOnly || PauseExcelNavigation || _isEditingCell)
+            return;
+
+        if (CurrentColumn == null || CurrentColumn.IsReadOnly)
+            return;
+
+        if (SelectedItems.Count != 1)
+            return;
+
+        BeginEdit();
+    }
+
+    /// <summary>
+    /// Excel-style Enter / Up / Down.
+    ///
+    /// **What is native and therefore not reimplemented** - measured against the real control, not
+    /// assumed (see the porting plan's item 7 for the probe output): Avalonia's DataGrid already
+    /// moves the current row on Up/Down, already cancels the edit on Escape, and already
+    /// commits-and-moves-down on Enter. Only the genuinely Excel-shaped parts are added here:
+    ///
+    ///  - **Enter while editing moves to the next cell to the right**, wrapping to the first
+    ///    editable column of the next row, skipping read-only columns, and resumes editing there.
+    ///    Natively Enter just commits and drops down a row, losing both the column position and the
+    ///    edit mode.
+    ///  - **Up/Down while editing keep editing** on the new row. Natively the edit ends.
+    ///
+    /// WPF achieved the same by moving *focus* (<c>MoveFocus(FocusNavigationDirection.Next)</c>),
+    /// which relies on WPF's logical focus order inside a DataGridCell. Avalonia has no equivalent
+    /// traversal across grid cells, so the current cell is set directly - which is also what turns
+    /// WPF's self-protecting "max turns" walk over read-only columns into a plain LINQ skip.
+    /// </summary>
+    private bool HandleExcelNavigationKey(KeyEventArgs e)
+    {
+        if (PauseExcelNavigation || IsReadOnly)
+            return false;
+
+        switch (e.Key)
+        {
+            case Key.Enter:
+            {
+                if (_isEditingCell)
+                    CommitEdit(DataGridEditingUnit.Cell, exitEditingMode: true);
+
+                MoveToNextEditableCell(wrapToNextRow: true);
+
+                if (CurrentColumn is { IsReadOnly: false })
+                    BeginEdit();
+
+                return true;
+            }
+
+            case Key.Up:
+            case Key.Down:
+            {
+                if (!_isEditingCell)
+                    return false; // plain row navigation is already native
+
+                CommitEdit(DataGridEditingUnit.Cell, exitEditingMode: true);
+
+                var items = ItemsSource?.Cast<object>().ToList() ?? new List<object>();
+                var index = SelectedItem != null ? items.IndexOf(SelectedItem) : -1;
+                var newIndex = e.Key == Key.Down ? index + 1 : index - 1;
+
+                if (index < 0 || newIndex < 0 || newIndex >= items.Count)
+                    return true; // at the edge - the edit was committed, nothing else to do
+
+                SetCurrentValue(SelectedItemProperty, items[newIndex]);
+
+                if (CurrentColumn is { IsReadOnly: false })
+                    BeginEdit();
+
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Moves the current cell to the next editable, visible column, optionally wrapping to the
+    /// first editable column of the next row when this row has none left.
+    /// </summary>
+    private void MoveToNextEditableCell(bool wrapToNextRow)
+    {
+        var ordered = Columns.Where(c => c.IsVisible).OrderBy(c => c.DisplayIndex).ToList();
+        if (ordered.Count == 0)
+            return;
+
+        var currentIndex = CurrentColumn != null ? ordered.IndexOf(CurrentColumn) : -1;
+
+        var next = ordered.Skip(currentIndex + 1).FirstOrDefault(c => !c.IsReadOnly);
+        if (next != null)
+        {
+            CurrentColumn = next;
+            return;
+        }
+
+        if (!wrapToNextRow)
+            return;
+
+        var items = ItemsSource?.Cast<object>().ToList() ?? new List<object>();
+        var rowIndex = SelectedItem != null ? items.IndexOf(SelectedItem) : -1;
+        if (rowIndex >= 0 && rowIndex + 1 < items.Count)
+            SetCurrentValue(SelectedItemProperty, items[rowIndex + 1]);
+
+        var first = ordered.FirstOrDefault(c => !c.IsReadOnly);
+        if (first != null)
+            CurrentColumn = first;
+    }
+
+    /// <summary>
+    /// Makes a cell editor's dropdown suspend the grid's Excel navigation while it is open - the
+    /// direct equivalent of WPF binding a combo box column's <c>IsDropDownOpen</c> to
+    /// <see cref="PauseExcelNavigation"/>.
+    /// </summary>
+    internal void AttachDropDownPauses(ComboBox comboBox)
+    {
+        comboBox.DropDownOpened += (_, _) => SetCurrentValue(PauseExcelNavigationProperty, true);
+        comboBox.DropDownClosed += (_, _) => SetCurrentValue(PauseExcelNavigationProperty, false);
+    }
+
+    #endregion
 
     #region Drag & drop row reordering
 
@@ -414,6 +598,14 @@ public class CustomDataGrid : DataGrid
         {
             e.Handled = true;
             _ = PasteAsync();
+            return;
+        }
+
+        // Excel-style navigation runs before the base implementation for the keys it claims, so the
+        // grid's own (plainer) Enter/arrow handling does not get there first.
+        if (HandleExcelNavigationKey(e))
+        {
+            e.Handled = true;
             return;
         }
 
@@ -1078,7 +1270,25 @@ public class CustomDataGrid : DataGrid
         // build, while the page's own DataSet is loading, and querying a second entity from there
         // deadlocks in the shared EntityDeferredCommitService layer (hit for real - a headless run
         // that produced no output at all). See DataGridLookupComboBoxColumn.ItemsSourceProvider.
-        Func<IEnumerable?> itemsProvider = () => (lookupView as Data.AvaloniaPropertyLookupView)?.GetItems();
+        Func<IEnumerable?> itemsProvider = () =>
+        {
+            var view = lookupView as Data.AvaloniaPropertyLookupView;
+            var items = view?.GetItems();
+
+            // Re-query when the cached result is empty. AvaloniaPropertyLookupView runs its query
+            // exactly once and keeps the result forever (see its _isRefreshedOnce), so a lookup
+            // first touched before the referenced rows existed would stay empty for the rest of the
+            // session - which item 7's auto-begin-edit made reachable, by creating a cell editor as
+            // soon as a cell becomes current rather than only on a user click. An empty lookup is
+            // cheap to retry and is never the answer anyone wants to cache.
+            if (items is { Count: 0 })
+            {
+                view!.Refresh();
+                items = view.GetItems();
+            }
+
+            return items;
+        };
 
         var selectedValuePath = GetLookupFieldName(columnPropertyView.LookupDefinition?.FieldSelectorFunc);
         if (string.IsNullOrEmpty(selectedValuePath))
@@ -1094,7 +1304,9 @@ public class CustomDataGrid : DataGrid
         {
             PropertyPath = BuildBindingPath(columnPropertyView),
             ItemsSourceProvider = itemsProvider,
-            SelectedValuePath = selectedValuePath
+            SelectedValuePath = selectedValuePath,
+            // Same reason as the enum column: the open dropdown owns the navigation keys.
+            OnEditorCreated = AttachDropDownPauses
             // DisplayMemberPath is left unset: it is derived from the lookup entry type's
             // [LookupColumn] metadata, which needs the entries, which is exactly what must not be
             // queried yet. The column resolves it on first use.
@@ -1213,6 +1425,11 @@ public class CustomDataGrid : DataGrid
                 {
                     Mode = isReadOnly ? BindingMode.OneWay : BindingMode.TwoWay
                 });
+
+                // While this dropdown is open the arrow/Enter keys belong to it, not to the grid's
+                // Excel navigation - the same thing WPF's enum column did by binding IsDropDownOpen
+                // to CustomDataGrid.PauseExcelNavigation.
+                AttachDropDownPauses(comboBox);
                 return comboBox;
             }, supportsRecycling: true)
         };

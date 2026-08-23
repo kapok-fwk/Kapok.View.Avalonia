@@ -778,6 +778,127 @@ public class App : Application
             Console.WriteLine($"KAPOK_ROW_DRAG: after MoveRow(Groceries -> Garden)=[{Order()}]");
         }
 
+        // Phase 7 item 7: a real side-by-side probe of Avalonia's *native* DataGrid cell navigation
+        // before deciding whether WPF's Excel-navigation code needs porting at all. Prints what the
+        // grid actually does for each key, rather than assuming.
+        if (Environment.GetEnvironmentVariable("KAPOK_HEADLESS_SCREENSHOT_NAV") == "1" &&
+            page is Tasks navPage && navPage.DataSet is { } navDataSet)
+        {
+            foreach (var taskName in new[] { "Row one", "Row two", "Row three" })
+            {
+                navDataSet.CreateNewEntryAction.Execute();
+                navDataSet.Current!.Name = taskName;
+            }
+            Dispatcher.UIThread.RunJobs();
+
+            var navGrid = lastOpenedWindow!.GetVisualDescendants().OfType<CustomDataGrid>().First();
+
+            // Only the *current* cell counts: a cell that merely contains a ComboBox in its
+            // template (the enum column) is not an open editor, so scanning the whole grid for one
+            // reports false positives.
+            string EditingCell()
+            {
+                // DataGridColumn.GetCellContent(item) returns the element the column generated for
+                // that row; its owning DataGridCell is the one to inspect.
+                var content = navGrid.SelectedItem == null || navGrid.CurrentColumn == null
+                    ? null
+                    : navGrid.CurrentColumn.GetCellContent(navGrid.SelectedItem);
+                var cell = content?.GetSelfAndVisualAncestors().OfType<DataGridCell>().FirstOrDefault();
+                if (cell == null)
+                    return "<no cell>";
+
+                var editor = cell.GetVisualDescendants().OfType<TextBox>().FirstOrDefault();
+                if (editor != null)
+                    return $"TextBox:{editor.Text}";
+
+                return cell.GetVisualDescendants().OfType<ComboBox>().Any() ? "ComboBox" : "<none>";
+            }
+
+            string State(string label) =>
+                $"KAPOK_NAV: {label} row={(navGrid.SelectedItem as DataModel.Task)?.Name} " +
+                $"column={navGrid.CurrentColumn?.Header} editingCell={EditingCell()}";
+
+            void Key(Key key, KeyModifiers modifiers = KeyModifiers.None)
+            {
+                navGrid.RaiseEvent(new KeyEventArgs
+                {
+                    RoutedEvent = InputElement.KeyDownEvent,
+                    Key = key,
+                    KeyModifiers = modifiers
+                });
+                Dispatcher.UIThread.RunJobs();
+            }
+
+            navGrid.SelectedIndex = 0;
+            navGrid.CurrentColumn = navGrid.Columns[0];
+            Dispatcher.UIThread.RunJobs();
+            Console.WriteLine(State("start, AutoBeginEditOnCurrentCell off (no auto-edit expected)"));
+
+            // Auto-begin-edit is opt-in here, unlike WPF - see
+            // CustomDataGrid.AutoBeginEditOnCurrentCellProperty for why.
+            navGrid.AutoBeginEditOnCurrentCell = true;
+            navGrid.SelectedIndex = 1;
+            Dispatcher.UIThread.RunJobs();
+            Console.WriteLine(State("with AutoBeginEditOnCurrentCell on, after moving the current cell"));
+            navGrid.AutoBeginEditOnCurrentCell = false;
+            navGrid.CancelEdit();
+            navGrid.SelectedIndex = 0;
+            Dispatcher.UIThread.RunJobs();
+
+            Key(global::Avalonia.Input.Key.Down);
+            Console.WriteLine(State("after Down"));
+
+            Key(global::Avalonia.Input.Key.Up);
+            Console.WriteLine(State("after Up"));
+
+            navGrid.BeginEdit();
+            Dispatcher.UIThread.RunJobs();
+            Console.WriteLine(State("after BeginEdit"));
+
+            Key(global::Avalonia.Input.Key.Enter);
+            Console.WriteLine(State("after Enter while editing"));
+
+            navGrid.BeginEdit();
+            Dispatcher.UIThread.RunJobs();
+            Key(global::Avalonia.Input.Key.Escape);
+            Console.WriteLine(State("after Escape while editing"));
+
+            Key(global::Avalonia.Input.Key.Tab);
+            Console.WriteLine(State("after Tab"));
+
+            // Excel navigation proper: Enter while editing should walk right across editable
+            // columns and then wrap to the next row, not just drop down a row.
+            navGrid.SelectedIndex = 0;
+            navGrid.CurrentColumn = navGrid.Columns[0];
+            navGrid.BeginEdit();
+            Dispatcher.UIThread.RunJobs();
+            Console.WriteLine(State("excel: begin edit at first cell"));
+
+            for (var i = 1; i <= 6; i++)
+            {
+                Key(global::Avalonia.Input.Key.Enter);
+                Console.WriteLine(State($"excel: after Enter #{i}"));
+            }
+
+            // Up/Down while editing must stay in edit mode on the new row.
+            Key(global::Avalonia.Input.Key.Down);
+            Console.WriteLine(State("excel: after Down while editing"));
+            Key(global::Avalonia.Input.Key.Up);
+            Console.WriteLine(State("excel: after Up while editing"));
+
+            // And PauseExcelNavigation must hand the keys back to the cell's own editor.
+            // With the pause on, the Excel handler must not claim the key - it goes to the base
+            // DataGrid (or, in a real app, to the open dropdown that set the pause). The observable
+            // difference is the *column*: Excel navigation walks right, the native handler does not.
+            navGrid.PauseExcelNavigation = true;
+            var pausedColumn = navGrid.CurrentColumn?.Header;
+            Key(global::Avalonia.Input.Key.Enter);
+            Console.WriteLine($"KAPOK_NAV: paused: column before={pausedColumn} after={navGrid.CurrentColumn?.Header} " +
+                              $"(unchanged={Equals(navGrid.CurrentColumn?.Header, pausedColumn)}) " +
+                              $"row={(navGrid.SelectedItem as DataModel.Task)?.Name}");
+            navGrid.PauseExcelNavigation = false;
+        }
+
         // Phase 5 verification: proves LookupComboBox's dropdown DataGrid actually renders real
         // lookup rows, not just that the (closed) combo box exists. Opens the dropdown on
         // whichever LookupComboBox is in the just-shown window's visual tree, after the seed
