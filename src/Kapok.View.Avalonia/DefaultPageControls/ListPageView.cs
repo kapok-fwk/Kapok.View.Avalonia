@@ -93,6 +93,18 @@ public class ListPageView : UserControl
                 Converter = new InverseBooleanConverter()
             });
 
+        // Excel-style paste (item 5). CanUserPasteToNewRows follows DataSet.InsertAllowed, exactly
+        // as WPF's TableDataDataGrid style bound it, and new rows are created through the DataSet's
+        // own CreateNewEntryAction - the same business-layer path the "New" button takes, rather
+        // than appending straight to the bound collection.
+        _dataGrid.Bind(CustomDataGrid.CanUserPasteToNewRowsProperty,
+            new Binding(nameof(IDataSetView.InsertAllowed)) { Source = dataSet, Mode = BindingMode.OneWay });
+        _dataGrid.CreateNewRow = () =>
+        {
+            dataSet.CreateNewEntryAction.Execute();
+            return dataSet.Current;
+        };
+
         // Per-column filter (item 3): bound before ColumnsSource so the header filter inputs can
         // resolve their view models as soon as the first column headers are realized.
         // DataSet.Filter is created in DataSetView's constructor, so UserLayer is always available

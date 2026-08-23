@@ -622,6 +622,91 @@ public class App : Application
             }
         }
 
+        // Phase 7 item 5 verification: Excel-style paste. Two runs in one: a real clipboard
+        // round-trip (put tab-separated text on the actual system clipboard, then Ctrl/Cmd+V on the
+        // grid) and a direct PasteRows call. Both matter - the first proves the clipboard read and
+        // the key binding, the second proves the row/column walk and value conversion deterministically,
+        // without depending on a clipboard being available at all in the headless environment.
+        if (Environment.GetEnvironmentVariable("KAPOK_HEADLESS_SCREENSHOT_PASTE") == "1" &&
+            page is Tasks pastePage && pastePage.DataSet is { } pasteDataSet)
+        {
+            pasteDataSet.CreateNewEntryAction.Execute();
+            pasteDataSet.Current!.Name = "Existing task";
+            Dispatcher.UIThread.RunJobs();
+
+            var pasteGrid = lastOpenedWindow!.GetVisualDescendants().OfType<CustomDataGrid>().First();
+            pasteGrid.SelectedIndex = 0;
+            pasteGrid.CurrentColumn = pasteGrid.Columns.First();
+            Dispatcher.UIThread.RunJobs();
+
+            string Tasks_() => string.Join(" | ", pasteDataSet.Collection.Select(t =>
+                $"{t.Name}/{t.Priority}/{t.EstimatedTime}/{t.DueDate:yyyy-MM-dd}"));
+
+            Console.WriteLine($"KAPOK_PASTE: before rows={pasteDataSet.Collection.Count} [{Tasks_()}]");
+            Console.WriteLine($"KAPOK_PASTE: canUserPasteToNewRows={pasteGrid.CanUserPasteToNewRows} " +
+                              $"gridReadOnly={pasteGrid.IsReadOnly}");
+
+            // Three rows x four columns (Task / Priority / Description / Est. h), the first
+            // overwriting the existing row and the other two creating new entries. Deliberately
+            // exercises three different conversions: string, enum (by name) and decimal.
+            var clipboardRows = new List<object?[]>
+            {
+                new object?[] { "Buy milk", "High", "Two litres", "1.25" },
+                new object?[] { "Buy bread", "Normal", "Sourdough", "0.5" },
+                new object?[] { "Call plumber", "Urgent", "Leaking tap", "2" }
+            };
+
+            var pastedCells = pasteGrid.PasteRows(clipboardRows);
+            Dispatcher.UIThread.RunJobs();
+            Console.WriteLine($"KAPOK_PASTE: PasteRows wrote {pastedCells} cells, rows={pasteDataSet.Collection.Count} [{Tasks_()}]");
+
+            // Same content, now through the real system clipboard and the real Ctrl/Cmd+V handler.
+            var clipboard = lastOpenedWindow.Clipboard;
+            if (clipboard != null)
+            {
+                var dataTransfer = new DataTransfer();
+                dataTransfer.Add(DataTransferItem.CreateText("Wash car\tLow\tIncluding the wheels\t0.75"));
+                clipboard.SetDataAsync(dataTransfer).GetAwaiter().GetResult();
+
+                pasteGrid.SelectedIndex = pasteDataSet.Collection.Count - 1;
+                pasteGrid.CurrentColumn = pasteGrid.Columns.First();
+                Dispatcher.UIThread.RunJobs();
+
+                pasteGrid.RaiseEvent(new KeyEventArgs
+                {
+                    RoutedEvent = InputElement.KeyDownEvent,
+                    Key = Key.V,
+                    KeyModifiers = OperatingSystem.IsMacOS() ? KeyModifiers.Meta : KeyModifiers.Control
+                });
+
+                for (var i = 0; i < 5; i++)
+                {
+                    Dispatcher.UIThread.RunJobs();
+                    AvaloniaHeadlessPlatform.ForceRenderTimerTick();
+                }
+
+                Console.WriteLine($"KAPOK_PASTE: after Ctrl+V rows={pasteDataSet.Collection.Count} [{Tasks_()}]");
+            }
+            else
+            {
+                Console.WriteLine("KAPOK_PASTE: no clipboard available in this environment - Ctrl+V path not exercised");
+            }
+
+            // CanUserPasteToNewRows=false must stop at the existing rows instead of growing the list.
+            pasteGrid.CanUserPasteToNewRows = false;
+            var rowsBefore = pasteDataSet.Collection.Count;
+            pasteGrid.SelectedIndex = rowsBefore - 1;
+            pasteGrid.CurrentColumn = pasteGrid.Columns.First();
+            Dispatcher.UIThread.RunJobs();
+            pasteGrid.PasteRows(new List<object?[]>
+            {
+                new object?[] { "Overwrites last row" },
+                new object?[] { "Must not be created" }
+            });
+            Dispatcher.UIThread.RunJobs();
+            Console.WriteLine($"KAPOK_PASTE: with CanUserPasteToNewRows=false rows={pasteDataSet.Collection.Count} (was {rowsBefore}) [{Tasks_()}]");
+        }
+
         // Phase 5 verification: proves LookupComboBox's dropdown DataGrid actually renders real
         // lookup rows, not just that the (closed) combo box exists. Opens the dropdown on
         // whichever LookupComboBox is in the just-shown window's visual tree, after the seed

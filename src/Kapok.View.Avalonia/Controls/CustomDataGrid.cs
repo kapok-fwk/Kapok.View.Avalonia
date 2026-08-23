@@ -8,10 +8,12 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Templates;
 using Avalonia.Data;
+using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Styling;
 using Kapok.BusinessLayer;
+using Kapok.View.Avalonia.Helper;
 using Kapok.View.Avalonia.ValueConverter;
 
 namespace Kapok.View.Avalonia.Controls;
@@ -86,6 +88,243 @@ public class CustomDataGrid : DataGrid
         AutoGeneratingColumn += OnAutoGeneratingColumnApplyMetadata;
         SelectionChanged += OnSelectionChangedSyncSelectedEntries;
     }
+
+    #region Clipboard paste
+
+    /// <summary>
+    /// Whether pasting more rows than the grid currently has may create new entries. Bound to
+    /// <c>DataSet.InsertAllowed</c>, matching WPF's CustomDataGrid property of the same name.
+    /// </summary>
+    public static readonly StyledProperty<bool> CanUserPasteToNewRowsProperty =
+        AvaloniaProperty.Register<CustomDataGrid, bool>(nameof(CanUserPasteToNewRows), defaultValue: true);
+
+    public bool CanUserPasteToNewRows
+    {
+        get => GetValue(CanUserPasteToNewRowsProperty);
+        set => SetValue(CanUserPasteToNewRowsProperty, value);
+    }
+
+    /// <summary>
+    /// Creates one new entry through the business layer and returns it, or null when the host has
+    /// not supplied a factory.
+    ///
+    /// WPF grew the list by driving its DataGrid's <c>NewItemPlaceholder</c> row through
+    /// <c>IEditableCollectionView.AddNew()</c>. Avalonia's DataGrid has neither concept, and adding
+    /// straight to the bound ObservableCollection would bypass the business layer entirely (no
+    /// <c>InitNewEntry</c>, no <c>AddingNewEntry</c>/<c>NewEntryAdded</c> events). A factory the
+    /// host wires to <c>DataSet.CreateNewEntryAction</c> keeps paste on the same path as the "New"
+    /// button - see ListPageView.
+    /// </summary>
+    public Func<object?>? CreateNewRow { get; set; }
+
+    protected override void OnKeyDown(KeyEventArgs e)
+    {
+        // WPF registered a class CommandBinding for ApplicationCommands.Paste. Avalonia has no
+        // application-command routing, so Ctrl+V (Cmd+V on macOS) is handled directly. Fire and
+        // forget is deliberate: the clipboard API is async all the way down and OnKeyDown cannot
+        // await; PasteAsync itself never throws out.
+        if (e.Key == Key.V && e.KeyModifiers.HasFlag(PlatformPasteModifier) && !IsReadOnly)
+        {
+            e.Handled = true;
+            _ = PasteAsync();
+            return;
+        }
+
+        base.OnKeyDown(e);
+    }
+
+    private static KeyModifiers PlatformPasteModifier =>
+        OperatingSystem.IsMacOS() ? KeyModifiers.Meta : KeyModifiers.Control;
+
+    /// <summary>
+    /// Pastes the clipboard's tabular content into the grid, starting at the current cell.
+    ///
+    /// Port of WPF CustomDataGrid's OnExecutedPaste. The shape of the loop (start at the current
+    /// row/column, stop when the clipboard runs out, skip read-only columns) is the same; what
+    /// differs is how a value reaches the entity. WPF called
+    /// <c>DataGridColumn.OnPastingCellClipboardContent</c>, which Avalonia's DataGridColumn does not
+    /// have - so the target property is resolved from the column's own
+    /// <see cref="DataGridColumn.ClipboardContentBinding"/> (which every column this grid generates
+    /// sets, and which DataGridBoundColumn derives from its Binding) and assigned with a real type
+    /// conversion.
+    /// </summary>
+    /// <returns>The number of cells actually written.</returns>
+    public async Task<int> PasteAsync()
+    {
+        var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
+        var rowData = await ClipboardHelper.ParseClipboardDataAsync(clipboard).ConfigureAwait(true);
+
+        return PasteRows(rowData);
+    }
+
+    /// <summary>
+    /// The paste itself, separated from reading the clipboard so it can be driven from data
+    /// directly (verification, or a caller that already has the rows).
+    /// </summary>
+    public int PasteRows(IReadOnlyList<object?[]> rowData)
+    {
+        if (rowData.Count == 0 || IsReadOnly)
+            return 0;
+
+        var items = ItemsSource?.Cast<object>().ToList() ?? new List<object>();
+
+        var firstRowIndex = CurrentItemIndex(items);
+        var targetColumns = ColumnsFromCurrent();
+        if (targetColumns.Count == 0)
+            return 0;
+
+        var pastedCells = 0;
+
+        for (var rowDataIndex = 0; rowDataIndex < rowData.Count; rowDataIndex++)
+        {
+            var itemIndex = firstRowIndex + rowDataIndex;
+
+            object? item;
+            if (itemIndex < items.Count)
+            {
+                item = items[itemIndex];
+            }
+            else
+            {
+                if (!CanUserPasteToNewRows)
+                    break;
+
+                item = CreateNewRow?.Invoke();
+                if (item == null)
+                    break;
+
+                items.Add(item);
+            }
+
+            var cells = rowData[rowDataIndex];
+            var cellCount = Math.Min(cells.Length, targetColumns.Count);
+
+            for (var cellIndex = 0; cellIndex < cellCount; cellIndex++)
+            {
+                var column = targetColumns[cellIndex];
+                if (column.IsReadOnly)
+                    continue;
+
+                if (TrySetCellValue(item, column, cells[cellIndex]))
+                    pastedCells++;
+            }
+        }
+
+        return pastedCells;
+    }
+
+    /// <summary>Index of the row the paste starts at - the current row, or the first one.</summary>
+    private int CurrentItemIndex(List<object> items)
+    {
+        if (SelectedItem != null)
+        {
+            var index = items.IndexOf(SelectedItem);
+            if (index >= 0)
+                return index;
+        }
+
+        return 0;
+    }
+
+    /// <summary>
+    /// The visible columns from the current one rightwards, in display order - matching WPF's
+    /// ColumnFromDisplayIndex walk from <c>CurrentColumn</c> to the last column.
+    /// </summary>
+    private List<DataGridColumn> ColumnsFromCurrent()
+    {
+        var ordered = Columns.Where(c => c.IsVisible).OrderBy(c => c.DisplayIndex).ToList();
+
+        var startIndex = CurrentColumn != null ? ordered.IndexOf(CurrentColumn) : 0;
+        if (startIndex < 0)
+            startIndex = 0;
+
+        return ordered.Skip(startIndex).ToList();
+    }
+
+    /// <summary>
+    /// Writes one clipboard value into one entity property, converting it to the property's type.
+    /// </summary>
+    private static bool TrySetCellValue(object item, DataGridColumn column, object? value)
+    {
+        var path = (column.ClipboardContentBinding as Binding)?.Path;
+        if (string.IsNullOrEmpty(path))
+            return false;
+
+        var propertyInfo = item.GetType().GetProperty(path);
+        if (propertyInfo?.SetMethod == null)
+            return false;
+
+        if (!TryConvert(value, propertyInfo.PropertyType, out var converted))
+            return false;
+
+        propertyInfo.SetValue(item, converted);
+        return true;
+    }
+
+    /// <summary>
+    /// Converts a clipboard cell to the target property's type. Clipboard values arrive either as
+    /// strings (CSV/text) or already typed (Excel's XML Spreadsheet carries DateTime/decimal - see
+    /// ClipboardHelper), so both cases are handled. A value that cannot be converted is skipped
+    /// rather than throwing: a paste covering several columns must not be aborted halfway by one
+    /// bad cell.
+    /// </summary>
+    private static bool TryConvert(object? value, Type targetType, out object? converted)
+    {
+        converted = null;
+
+        var underlyingType = Nullable.GetUnderlyingType(targetType) ?? targetType;
+
+        if (value == null || (value is string text && text.Length == 0))
+        {
+            // An empty cell clears the property where that is representable: a string becomes
+            // empty, a nullable or reference type becomes null. A non-nullable value type has no
+            // "empty", so the cell is skipped rather than being forced to default(T) - pasting a
+            // blank must not silently write a 0 or a 01.01.0001.
+            if (targetType == typeof(string))
+            {
+                converted = string.Empty;
+                return true;
+            }
+
+            if (!targetType.IsValueType || targetType != underlyingType)
+            {
+                converted = null;
+                return true;
+            }
+
+            return false;
+        }
+
+        if (underlyingType.IsInstanceOfType(value))
+        {
+            converted = value;
+            return true;
+        }
+
+        try
+        {
+            if (underlyingType.IsEnum)
+            {
+                converted = Enum.Parse(underlyingType, value.ToString()!, ignoreCase: true);
+                return true;
+            }
+
+            if (underlyingType == typeof(Guid))
+            {
+                converted = Guid.Parse(value.ToString()!);
+                return true;
+            }
+
+            converted = Convert.ChangeType(value, underlyingType, CultureInfo.CurrentCulture);
+            return true;
+        }
+        catch (Exception exception) when (exception is FormatException or InvalidCastException or OverflowException or ArgumentException)
+        {
+            return false;
+        }
+    }
+
+    #endregion
 
     #region Lookup / drill-down sources
 
