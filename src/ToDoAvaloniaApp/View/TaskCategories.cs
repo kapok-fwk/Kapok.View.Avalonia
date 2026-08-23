@@ -4,22 +4,27 @@ using ToDoAvaloniaApp.DataModel;
 namespace ToDoAvaloniaApp.View;
 
 /// <summary>
-/// The showcase page for Phase 7 item 4's hierarchy tree column: a flat
-/// <see cref="ListPage{TEntry}"/> over <see cref="TaskCategory"/> whose Name column is marked
-/// <see cref="ColumnPropertyView.ShowHierarchicalTree"/>, so CustomDataGrid generates a
-/// <c>DataGridTreeTextColumn</c> for it.
+/// The showcase page for both Phase 7 item 4's hierarchy tree column (indentation, connector
+/// lines and an expander rendered from each row's own Level/HasChildren/IsExpanded) and Phase 8
+/// item 4's hierarchy *navigation* - expanding a node, moving it in/out a level.
 ///
-/// **Deliberately a plain ListPage, not a HierarchyListPage.** Kapok's hierarchy *navigation* -
-/// expanding a node re-querying its children, move-in/move-out - lives in
-/// <c>IHierarchyDataSetView&lt;TEntry&gt;</c>, whose only implementation is WPF's 600-line
-/// <c>HierarchyDataSetView</c> built entirely on WPF's ICollectionView; this port's
-/// <c>AvaloniaViewDomain.CreateHierarchyDataSetView</c> still throws NotSupportedException and
-/// porting it is its own workstream (see the porting plan). The *column* does not need any of
-/// that: it renders indentation, connector lines and an expander from each row's own
-/// Level/HasChildren/IsExpanded values, which is exactly what this page provides. So this verifies
-/// the column honestly, and the navigation gap stays visible rather than being glossed over.
+/// A real <see cref="HierarchyListPage{TEntry}"/> (not plain <see cref="ListPage{TEntry}"/>, as
+/// this page was through Phase 7 - <c>AvaloniaViewDomain.CreateHierarchyDataSetView</c> threw
+/// NotSupportedException until Phase 8 item 4), which is what supplies the MoveIn/MoveOut menu
+/// actions. <see cref="InitializeBaseDataSet"/> is overridden to route through
+/// <c>CreateHierarchyDataSetView</c> instead of the base class's own <c>CreateDataSetView</c> -
+/// core Kapok.View's own <c>HierarchyListPage&lt;TEntry&gt;</c> never does this itself (confirmed
+/// by reading it: it only adds the two menu actions, referencing <c>DataSet as
+/// IHierarchyDataSetView&lt;TEntry&gt;</c> without ever arranging for <c>DataSet</c> to actually be
+/// one), and neither does <c>Kapok.View.Wpf.WpfViewDomain.CreateDataSetView</c> auto-detect
+/// <c>IHierarchyEntry&lt;TEntry&gt;</c> - so on both platforms, a page that only extends
+/// <c>HierarchyListPage&lt;TEntry&gt;</c> without also overriding <c>InitializeBaseDataSet</c>
+/// would get a plain, non-hierarchical DataSetView and its Move* actions would always report
+/// <c>CanExecute() == false</c>. A real (if narrow) gap in the shared core/WPF design, found while
+/// wiring this page up - out of scope to fix in either of those repos from here, so this override
+/// is the fix at the one call site this port actually has.
 /// </summary>
-public class TaskCategories : ListPage<TaskCategory>
+public class TaskCategories : HierarchyListPage<TaskCategory>
 {
     public TaskCategories(IServiceProvider serviceProvider) : base(serviceProvider)
     {
@@ -34,5 +39,14 @@ public class TaskCategories : ListPage<TaskCategory>
                 new(nameof(TaskCategory.Level)) { Width = 90 }
             }
         });
+    }
+
+    protected override IDataSetView<TaskCategory> InitializeBaseDataSet()
+    {
+        var dataSetView = ViewDomain.CreateHierarchyDataSetView<TaskCategory>(DataDomainScope);
+        dataSetView.InsertAllowed = AllowCreateNewEntry && (Editable || OpenCardPageAction != null);
+        dataSetView.ModifyAllowed = Editable;
+        dataSetView.DeleteAllowed = AllowDeleteEntry && (Editable || OpenCardPageAction != null);
+        return dataSetView;
     }
 }

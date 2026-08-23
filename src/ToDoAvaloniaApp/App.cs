@@ -240,7 +240,7 @@ public class App : Application
                     category.Name = categoryName;
                     category.Level = level;
                     category.HasChildren = hasChildren;
-                    category.ParentId = level switch { 1 => parentLevel0?.Id, 2 => parentLevel1?.Id, _ => null };
+                    category.Parent = (level switch { 1 => parentLevel0, 2 => parentLevel1, _ => null })!;
                     category.SortOrder = ++seededCategoryCount;
                     if (level == 0) parentLevel0 = category;
                     if (level == 1) parentLevel1 = category;
@@ -776,6 +776,79 @@ public class App : Application
             dragGrid.MoveRow(rows.First(c => c.Name == "Groceries"), rows.First(c => c.Name == "Garden"));
             Dispatcher.UIThread.RunJobs();
             Console.WriteLine($"KAPOK_ROW_DRAG: after MoveRow(Groceries -> Garden)=[{Order()}]");
+        }
+
+        // Phase 8 item 4 verification: hierarchy *navigation* (as opposed to Phase 7 item 4's tree
+        // *column*, which only ever renders whatever Level/HasChildren/IsExpanded already say).
+        // Exercises AvaloniaHierarchyDataSetView's real Collapse/Expand/MoveOut/MoveIn actions -
+        // the same TaskCategories tree ROW_DRAG uses (Home/Kitchen/Groceries/Garden/Work), and
+        // prints the resulting visible Collection order plus each entry's
+        // Level/IsVisible/IsExpanded/Parent after every step, since a screenshot alone can't prove
+        // *why* a row disappeared or which entry became whose parent.
+        if (Environment.GetEnvironmentVariable("KAPOK_HEADLESS_SCREENSHOT_HIERARCHY_NAV") == "1" &&
+            page is TaskCategories categoriesPage &&
+            categoriesPage.DataSet is IHierarchyDataSetView<DataModel.TaskCategory> hierarchyDataSet)
+        {
+            Dispatcher.UIThread.RunJobs();
+
+            string Rows() => string.Join(", ", hierarchyDataSet.Collection
+                .Select(c => $"{c.Name}(L{c.Level}{(c.HasChildren ? (c.IsExpanded ? "-v" : "-collapsed") : "")})"));
+
+            DataModel.TaskCategory Find(string name) => hierarchyDataSet.Collection.First(c => c.Name == name);
+
+            Console.WriteLine($"KAPOK_HIERARCHY_NAV: initial=[{Rows()}]");
+
+            // Collapse "Home" - its descendants (Kitchen, Groceries) must disappear from the
+            // visible Collection, "Garden"/"Work" (not descendants) must not be affected.
+            hierarchyDataSet.Current = Find("Home");
+            Console.WriteLine($"KAPOK_HIERARCHY_NAV: CollapseAction.CanExecute={hierarchyDataSet.CollapseAction.CanExecute()}");
+            hierarchyDataSet.CollapseAction.Execute();
+            Dispatcher.UIThread.RunJobs();
+            Console.WriteLine($"KAPOK_HIERARCHY_NAV: after collapsing Home=[{Rows()}] " +
+                              $"homeIsExpanded={Find("Home").IsExpanded} " +
+                              $"current={hierarchyDataSet.Current?.Name ?? "<null>"}");
+
+            // Expand it again via ToggleAction (not ExpandAction directly) - proves the combined
+            // expand/collapse toggle also works, not just the two dedicated actions.
+            Console.WriteLine($"KAPOK_HIERARCHY_NAV: ToggleAction.CanExecute={hierarchyDataSet.ToggleAction.CanExecute()}");
+            hierarchyDataSet.ToggleAction.Execute();
+            Dispatcher.UIThread.RunJobs();
+            Console.WriteLine($"KAPOK_HIERARCHY_NAV: after toggling Home=[{Rows()}]");
+
+            // Same for "Kitchen" (nested one level deeper) - collapsing it must hide "Groceries"
+            // without touching "Home" itself.
+            hierarchyDataSet.Current = Find("Kitchen");
+            hierarchyDataSet.CollapseAction.Execute();
+            Dispatcher.UIThread.RunJobs();
+            Console.WriteLine($"KAPOK_HIERARCHY_NAV: after collapsing Kitchen=[{Rows()}]");
+            hierarchyDataSet.ExpandAction.Execute();
+            Dispatcher.UIThread.RunJobs();
+            Console.WriteLine($"KAPOK_HIERARCHY_NAV: after expanding Kitchen=[{Rows()}]");
+
+            // MoveOut: "Garden" (level 1, child of Home) becomes a child of "Groceries"'s parent
+            // slot - the nearest preceding same-level entry is "Kitchen" (also level 1), so Garden
+            // should become Kitchen's child (level 2, parent=Kitchen).
+            hierarchyDataSet.Current = Find("Garden");
+            Console.WriteLine($"KAPOK_HIERARCHY_NAV: MoveOutAction.CanExecute(Garden)={hierarchyDataSet.MoveOutAction.CanExecute()}");
+            hierarchyDataSet.MoveOutAction.Execute();
+            Dispatcher.UIThread.RunJobs();
+            var garden = Find("Garden");
+            Console.WriteLine($"KAPOK_HIERARCHY_NAV: after MoveOut(Garden)=[{Rows()}] " +
+                              $"gardenLevel={garden.Level} gardenParent={garden.Parent?.Name ?? "<null>"} " +
+                              $"gardenParentId={garden.ParentId} kitchenId={Find("Kitchen").Id} " +
+                              $"kitchenHasChildren={Find("Kitchen").HasChildren}");
+
+            // MoveIn: promote Garden straight back out to level 0 (Kitchen -> Home -> root, i.e.
+            // MoveIn once should land it back at level 1 under Home again since MoveIn only ever
+            // steps up by one level and detaches the parent link entirely - a second MoveIn would
+            // be needed to reach level 0).
+            Console.WriteLine($"KAPOK_HIERARCHY_NAV: MoveInAction.CanExecute(Garden)={hierarchyDataSet.MoveInAction.CanExecute()}");
+            hierarchyDataSet.MoveInAction.Execute();
+            Dispatcher.UIThread.RunJobs();
+            garden = Find("Garden");
+            Console.WriteLine($"KAPOK_HIERARCHY_NAV: after MoveIn(Garden)=[{Rows()}] " +
+                              $"gardenLevel={garden.Level} gardenParent={garden.Parent?.Name ?? "<null>"} " +
+                              $"gardenParentId={garden.ParentId}");
         }
 
         // Phase 7 item 7: a real side-by-side probe of Avalonia's *native* DataGrid cell navigation

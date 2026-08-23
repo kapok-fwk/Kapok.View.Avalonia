@@ -371,14 +371,10 @@ public class AvaloniaViewDomain : ViewDomain, IAvaloniaViewDomain
 
     public override IHierarchyDataSetView<TEntry> CreateHierarchyDataSetView<TEntry>(IDataDomainScope dataDomainScope, IEntityService<TEntry>? entityService = null)
     {
-        // WPF's HierarchyDataSetView<TEntry> (600+ lines: expand/collapse, move-in/move-out tree
-        // navigation) is built entirely on top of WPF's ICollectionView.CurrentItem/
-        // MoveCurrentToPrevious/Next - there is no core, framework-agnostic equivalent to build on
-        // top of the way there was for the flat case. A real Avalonia port is its own scoped
-        // workstream, not part of this phase (ToDoAvaloniaApp has no hierarchical data either).
-        throw new NotSupportedException(
-            "Hierarchical data sets are not yet supported by Kapok.View.Avalonia. " +
-            "This is a known gap, tracked as follow-up work beyond the current phased build.");
+        // Phase 8 item 4: see AvaloniaHierarchyDataSetView's own header comment for why this is a
+        // rewrite of WPF's HierarchyDataSetView rather than a port (no ICollectionView equivalent
+        // to build on here).
+        return new AvaloniaHierarchyDataSetView<TEntry>(ServiceProvider, dataDomainScope, entityService);
     }
 
     public override void ShowInfoMessage(string message, string? title = null, IPage? ownerPage = null)

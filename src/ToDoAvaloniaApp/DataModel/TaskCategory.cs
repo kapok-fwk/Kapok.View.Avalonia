@@ -68,7 +68,25 @@ public class TaskCategory : EditableEntityBase, IHierarchyEntry<TaskCategory>, I
 
     #region IHierarchyEntry<TaskCategory>
 
-    public TaskCategory Parent { get; set; } = null!;
+    private TaskCategory? _parent;
+
+    /// <summary>
+    /// Phase 8 item 4: keeps <see cref="ParentId"/> (the real, mapped FK - what
+    /// <see cref="GetChildrenPredicate"/> and every query actually use) in sync whenever the
+    /// navigation reference changes, since nothing else in this sample entity does (no lazy-loading
+    /// proxy, no EF navigation-fixup) - AvaloniaHierarchyDataSetView's MoveIn/MoveOut assign this
+    /// property directly, the same way WPF's HierarchyDataSetView does, and without this the FK
+    /// would silently stop matching the in-memory tree the moment a node moved.
+    /// </summary>
+    public TaskCategory Parent
+    {
+        get => _parent!;
+        set
+        {
+            _parent = value;
+            ParentId = value?.Id;
+        }
+    }
 
     [Display(Name = "Level")]
     public int Level
