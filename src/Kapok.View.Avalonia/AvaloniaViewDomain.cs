@@ -157,6 +157,16 @@ public class AvaloniaViewDomain : ViewDomain, IAvaloniaViewDomain
 
         if (typeof(IListPage).IsAssignableFrom(pageType))
             return typeof(ListPageView);
+        // IDetailListPage isn't an IListPage (it inherits IDetailPage instead - see
+        // IDetailListPage.cs), but ListPageView only ever touches DataSet/IsEditable/
+        // OpenCardPageAction, all resolved through IDataPage or by reflecting the concrete type
+        // (see its Rebuild() method's own comments) - never anything IListPage-specific without an
+        // `is IListPage` guard first. So it already renders a DetailListPage<,> correctly (confirmed
+        // against DuckAccounting.View.Wpf's DonorAccountDocumentsDetailPageControl.xaml, a
+        // CustomDataGrid + double-click-opens-card-page detail page for exactly this page shape) -
+        // this just has to route to it instead of falling through to BlankPageView.
+        if (typeof(IDetailListPage).IsAssignableFrom(pageType))
+            return typeof(ListPageView);
         if (typeof(ICardPage).IsAssignableFrom(pageType))
             return typeof(CardPageView);
         return typeof(BlankPageView);

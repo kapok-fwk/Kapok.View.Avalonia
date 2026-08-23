@@ -182,6 +182,55 @@ public class App : Application
                               $"toolPaneTitleRendered={toolTitleFound}");
         }
 
+        // Real multi-document docking verification: opens two pages as real documents inside
+        // MainPage's own DocumentPageCollectionWindow (via ShowDocumentPage, not Show() - a
+        // separate top-level window) - proving DocumentPageCollectionWindow's DocumentPages sync
+        // (both tabs actually render) and its two-way active-document tracking
+        // (CurrentDocumentPage -> ActiveDockable when each is shown, then the same property read
+        // back after simulating a tab switch by setting it directly - headless mode has no real
+        // pointer to click a tab with, but this exercises the same SyncActiveDockableFromCurrentDocumentPage
+        // path a click would end up driving through Factory.SetActiveDockable).
+        if (pageTypeName == "MainPageDocking" && page is MainPage mainPage)
+        {
+            var taskLists = GetService<TaskLists>();
+            var docTasksPage = GetService<Tasks>();
+
+            mainPage.ShowDocumentPage(taskLists);
+            mainPage.ShowDocumentPage(docTasksPage);
+
+            for (var i = 0; i < 5; i++)
+            {
+                Dispatcher.UIThread.RunJobs();
+                AvaloniaHeadlessPlatform.ForceRenderTimerTick();
+            }
+
+            var tabTitlesRendered = lastOpenedWindow?.GetVisualDescendants().OfType<TextBlock>()
+                .Where(t => t.Text == taskLists.Title || t.Text == docTasksPage.Title)
+                .Select(t => t.Text)
+                .ToList() ?? new List<string?>();
+
+            Console.WriteLine($"KAPOK_MAIN_PAGE_DOCKING: documentPagesCount={mainPage.DocumentPages.Count} " +
+                              $"currentDocumentPage={mainPage.CurrentDocumentPage?.Title} " +
+                              $"tabsRendered=[{string.Join(", ", tabTitlesRendered)}]");
+
+            mainPage.CurrentDocumentPage = taskLists;
+            Console.WriteLine($"KAPOK_MAIN_PAGE_DOCKING: afterSwitchBack currentDocumentPage={mainPage.CurrentDocumentPage?.Title}");
+
+            // Closing a document must go through IPage.CloseAction (HostFactory.CloseDockable's
+            // whole reason to exist - see its own comment) so DocumentPages actually shrinks, not
+            // just the dock's own tab list.
+            docTasksPage.CloseAction.Execute();
+            for (var i = 0; i < 5; i++)
+            {
+                Dispatcher.UIThread.RunJobs();
+                AvaloniaHeadlessPlatform.ForceRenderTimerTick();
+            }
+            var tasksTabStillRendered = lastOpenedWindow?.GetVisualDescendants().OfType<TextBlock>()
+                .Any(t => t.Text == docTasksPage.Title) ?? false;
+            Console.WriteLine($"KAPOK_MAIN_PAGE_DOCKING: afterClose documentPagesCount={mainPage.DocumentPages.Count} " +
+                              $"tasksTabStillRendered={tasksTabStillRendered}");
+        }
+
         // Phase 7 item 1 verification: switching the page's current list view is a real Kapok
         // feature (WPF's ListPageControl toolbar has a menu for it) and the one thing that
         // actually re-drives CustomDataGrid's ColumnsSource CollectionChanged path at runtime -

@@ -4,7 +4,6 @@ using Kapok.Report;
 using Kapok.View;
 using Kapok.View.Avalonia;
 using Kapok.View.Avalonia.Dock;
-using Kapok.View.Avalonia.Windows;
 using ToDoAvaloniaApp.BusinessLogic;
 using ToDoAvaloniaApp.DataModel;
 using ToDoAvaloniaApp.View;
@@ -38,12 +37,13 @@ public class ToDoModule : ModuleBase
         ViewDomain.RegisterEntityDefaultPage<TaskList>(typeof(TaskLists));
         ViewDomain.RegisterEntityDefaultPage<TaskCategory>(typeof(TaskCategories));
 
-        // MainPage is a plain InteractivePage (see View/MainPage.cs) - it doesn't match any of
+        // MainPage is a DocumentPageCollectionPage (see View/MainPage.cs) - it doesn't match any of
         // AvaloniaViewDomain.ConstructWindow's IListPage/IDialogPage/ICardPage fallbacks, so it
         // needs an explicit window constructor, same as WpfViewDomain.RegisterPageWpfWindowConstructor
-        // did for the WPF version's MainPageWindow. Reuses the generic PageWindow rather than a
-        // dedicated MainPageWindow subclass - no custom chrome needed yet in this phase.
-        AvaloniaViewDomain.RegisterPageWindowConstructor<MainPage>(() => new PageWindow());
+        // did for the WPF version's MainPageWindow. DocumentPageCollectionWindow is the real
+        // multi-document docking host (see its own doc comment), not the generic PageWindow this
+        // registration used before real docking existed.
+        AvaloniaViewDomain.RegisterPageWindowConstructor<MainPage>(() => new DocumentPageCollectionWindow());
 
         // Phase 8 item 7: TestPage (see View/TestPage.cs) is the exact same shape as MainPage - a
         // plain InteractivePage, not IListPage/IDialogPage/ICardPage - but never got the same
@@ -53,10 +53,11 @@ public class ToDoModule : ModuleBase
         // of those three, matching MainPage's own comment above almost exactly - this was a gap in
         // this module's own registration, not in AvaloniaViewDomain.
         //
-        // DockPageWindow, not the plain PageWindow MainPage uses: TestPage is also this session's
-        // real usage for InteractivePage.DetailPages -> ToolDock (see TestPage.cs and
-        // DockPageWindow's own "not live-verified" comment) - that wiring only exists on
-        // DockPageWindow, so TestPage needs to be hosted there to prove it for real.
+        // DockPageWindow, not DocumentPageCollectionWindow: TestPage is a single fixed page, not a
+        // DocumentPageCollectionPage host - and is also this session's real usage for
+        // InteractivePage.DetailPages -> ToolDock (see TestPage.cs and DockPageWindow's own "not
+        // live-verified" comment) - that wiring only exists on DockPageWindow, so TestPage needs to
+        // be hosted there to prove it for real.
         AvaloniaViewDomain.RegisterPageWindowConstructor<TestPage>(() => new DockPageWindow());
 
         // TaskCard (Phase 5's real LookupComboBox usage) needs its own hand-built control -

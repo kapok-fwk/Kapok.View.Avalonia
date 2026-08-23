@@ -18,7 +18,7 @@ public class AvaloniaDockViewDomain : AvaloniaViewDomain
     {
         DefaultCardPageWindow = typeof(DockPageWindow);
         DefaultListPageWindow = typeof(DockPageWindow);
-        DefaultPopupListPageWindow = typeof(DockPageWindow);
+        DefaultPopupListPageWindow = typeof(PopupListPageWindow);
     }
 
     /// <summary>

@@ -117,7 +117,17 @@ public class PageWindow : RibbonWindow
         }
     }
 
-    private void RebuildRibbon()
+    /// <summary>
+    /// Protected (not private) so DocumentPageCollectionWindow can rebuild the Ribbon a second time
+    /// after running OnLoadingAction - see that class's own comment on why: RibbonMenuBuilder
+    /// builds statically from whatever Menu[Base].MenuItems holds at DataContextChanged time (its
+    /// own doc comment already calls this out - "does not react to... after the initial build"),
+    /// which for a DocumentPageCollectionPage host is before OnLoading() has run (OnLoadingAction
+    /// only fires from Initialized, which happens later than DataContext being set), so a page like
+    /// MainPage that replaces its own Base tab from OnLoading() (matching WPF's identical pattern)
+    /// would otherwise show the pre-OnLoading tab forever.
+    /// </summary>
+    protected void RebuildRibbon()
     {
         if (DataContext is not InteractivePage page)
             return;

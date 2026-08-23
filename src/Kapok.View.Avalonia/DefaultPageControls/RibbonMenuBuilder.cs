@@ -71,7 +71,14 @@ public static class RibbonMenuBuilder
         }
     }
 
-    private static Control? BuildLeaf(UIMenuItem item)
+    /// <summary>
+    /// Builds the control for a single menu leaf (action button/toggle/table-data button/dropdown).
+    /// Exposed (not just used internally by <see cref="Build"/>) so Kapok.View.Avalonia.Dock's
+    /// PopupListPageWindow can reuse the exact same per-item logic for its flat toolbar instead of
+    /// duplicating it - matching WPF's PopupListPageWindow.xaml, which reuses the same
+    /// ToolbarMenuItemTemplateSelector its full Ribbon-hosting windows use.
+    /// </summary>
+    public static Control? BuildLeaf(UIMenuItem item)
     {
         // UIMenuItemDataSetSelectionAction<TEntry> is a closed generic type only known at
         // runtime - matches WPF's MenuItemTemplateSelector check against GetGenericTypeDefinition().
