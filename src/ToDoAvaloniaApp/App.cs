@@ -7,6 +7,7 @@ using Avalonia.Headless;
 using Avalonia.Input;
 using Avalonia.Input.Raw;
 using Avalonia.Markup.Xaml.Styling;
+using Avalonia.Platform;
 using Avalonia.Platform.Storage;
 using Avalonia.Themes.Fluent;
 using Avalonia.Threading;
@@ -260,7 +261,23 @@ public class App : Application
                 // auto-generated Id column made the row obvious) - naming it keeps the screenshot
                 // evidence readable.
                 if (page is TaskLists && dataSet.Current is DataModel.TaskList newTaskList)
+                {
                     newTaskList.Name = "Groceries";
+
+                    // Phase 8 item 5 verification: real image bytes (a genuine PNG asset already
+                    // embedded in this module, not a hand-rolled byte blob) for the [BinaryImage]
+                    // column, and real Kapok.View.ImageManager icon names for the [InfoImages]
+                    // column - both actually resolve through their respective converters.
+                    var iconUri = new Uri("avares://Kapok.View.Avalonia/Resources/Icons/account-book_small.png");
+                    using (var iconStream = AssetLoader.Open(iconUri))
+                    using (var iconBytes = new MemoryStream())
+                    {
+                        iconStream.CopyTo(iconBytes);
+                        newTaskList.Icon = iconBytes.ToArray();
+                    }
+                    newTaskList.Badges.Add("bank");
+                    newTaskList.Badges.Add("buildings");
+                }
 
                 if (page is Tasks && dataSet.Current is DataModel.Task newTask)
                 {

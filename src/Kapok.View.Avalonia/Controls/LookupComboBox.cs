@@ -200,21 +200,13 @@ public class LookupComboBox : CustomComboBox
 
         if (propertyInfo?.GetCustomAttribute<BinaryImageAttribute>() != null)
         {
-            // Avalonia's DataGrid has no DataGridImageColumn (confirmed: only Bound/CheckBox/
-            // Template/Text column types exist) - a template column hosting an Image is the
-            // direct equivalent. Not exercised by ToDoAvaloniaApp (no BinaryImageAttribute
-            // property on Task/TaskList), ported for parity rather than silently dropped.
-            var propertyName = e.PropertyName;
-            e.Column = new DataGridTemplateColumn
-            {
-                Header = e.PropertyName,
-                CellTemplate = new FuncDataTemplate<object>((_, _) =>
-                {
-                    var image = new Image { Stretch = Stretch.Uniform, MaxHeight = 40 };
-                    image.Bind(Image.SourceProperty, new Binding(propertyName));
-                    return image;
-                })
-            };
+            // Phase 8 item 5: reuses the real DataGridImageColumn (byte[] -> Bitmap via
+            // BinaryImageConverter) rather than the ad hoc, unconverted Image binding this used to
+            // build inline - that inline version bound Image.Source directly to the byte[] value
+            // with no converter at all, which cannot have ever actually rendered anything.
+            var imageColumn = new DataGridImageColumn { Header = e.PropertyName, PropertyPath = e.PropertyName };
+            imageColumn.BuildTemplates();
+            e.Column = imageColumn;
         }
 
         var displayAttribute = propertyInfo?.GetCustomAttribute<DisplayAttribute>();

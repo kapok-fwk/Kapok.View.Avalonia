@@ -4,6 +4,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.Linq.Expressions;
+using System.Reflection;
 using System.Windows.Input;
 using Avalonia;
 using Avalonia.Controls;
@@ -1331,6 +1332,21 @@ public class CustomDataGrid : DataGrid
         {
             return CreateDrillDownColumn(columnPropertyView, propertyType,
                 DrillDownActionDictionary[columnPropertyView.Name]);
+        }
+
+        if (propertyType == typeof(byte[]) &&
+            columnPropertyView.PropertyInfo.GetCustomAttribute<BinaryImageAttribute>() != null)
+        {
+            var imageColumn = new DataGridImageColumn { PropertyPath = BuildBindingPath(columnPropertyView) };
+            imageColumn.BuildTemplates();
+            return imageColumn;
+        }
+
+        if (columnPropertyView.PropertyInfo.GetCustomAttribute<InfoImagesAttribute>() != null)
+        {
+            var infoImagesColumn = new DataGridInfoImageColumn { PropertyPath = BuildBindingPath(columnPropertyView) };
+            infoImagesColumn.BuildTemplates();
+            return infoImagesColumn;
         }
 
         var binding = CreateCellBinding(columnPropertyView, isReadOnly);

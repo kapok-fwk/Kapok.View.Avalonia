@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using Kapok.Entity;
@@ -19,6 +20,7 @@ public class TaskList : EditableEntityBase
     private Guid _id = Guid.NewGuid();
     private string _name = string.Empty;
     private bool _isArchived;
+    private byte[]? _icon;
 
     [Key]
     [Display(Name = nameof(Id))]
@@ -44,6 +46,29 @@ public class TaskList : EditableEntityBase
         get => _isArchived;
         set => SetValidateProperty(ref _isArchived, value);
     }
+
+    /// <summary>
+    /// Phase 8 item 5 verification target for DataGridImageColumn/LookupComboBox's
+    /// [BinaryImage] branch - a small avatar/attachment image, the same shape a real Kapok entity
+    /// would use it for. Seeded from a real PNG asset (see App.cs), not a hand-rolled byte blob.
+    /// </summary>
+    [Display(Name = "Icon")]
+    [BinaryImage]
+    public byte[]? Icon
+    {
+        get => _icon;
+        set => SetValidateProperty(ref _icon, value);
+    }
+
+    /// <summary>
+    /// Phase 8 item 5 verification target for DataGridInfoImageColumn's [InfoImages] branch - a
+    /// row of small status badges. Seeded with real Kapok.View.ImageManager icon names (see
+    /// App.cs), matching what ImageNameToImageSourceConverter (the per-item image resolver this
+    /// column uses) actually accepts.
+    /// </summary>
+    [Display(Name = "Badges")]
+    [InfoImages]
+    public ObservableCollection<string> Badges { get; } = new();
 
     public override string ToString()
     {

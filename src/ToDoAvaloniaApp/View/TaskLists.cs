@@ -26,7 +26,13 @@ public class TaskLists : ListPage<TaskList>
                 {
                     DrillDownDefinition = new DrillDownDefinition<Task, TaskList>(typeof(Tasks),
                         (filter, taskList, _) => filter.AddPropertyFilter(nameof(Task.TaskListId), taskList.Id))
-                }
+                },
+                // Phase 8 item 5: the two image column kinds ([BinaryImage]/[InfoImages]) - see
+                // TaskList.Icon/Badges. Neither is auto-generated from plain reflection the way
+                // Name/IsArchived are (both need the real metadata-driven column path), so they
+                // only render at all once listed here, same as the drill-down column above.
+                new(nameof(TaskList.Icon)) { Width = 60 },
+                new(nameof(TaskList.Badges)) { Width = 70 }
             }
         });
 

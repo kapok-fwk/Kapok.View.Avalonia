@@ -71,7 +71,7 @@ run_scenario() {
 # doesn't (pointing at something macOS/Avalonia.Native-specific instead).
 run_scenario mainpage
 run_scenario tasklists-empty KAPOK_HEADLESS_SCREENSHOT_PAGE=TaskLists
-run_scenario tasklists-seeded KAPOK_HEADLESS_SCREENSHOT_PAGE=TaskLists KAPOK_HEADLESS_SCREENSHOT_SEED=1
+run_scenario tasklists-seeded KAPOK_HEADLESS_SCREENSHOT_PAGE=TaskLists KAPOK_HEADLESS_SCREENSHOT_SEED=1 KAPOK_HEADLESS_SCREENSHOT_DUMP_COLUMNS=1
 run_scenario tasks-seeded KAPOK_HEADLESS_SCREENSHOT_PAGE=Tasks KAPOK_HEADLESS_SCREENSHOT_SEED=1
 run_scenario taskcategories KAPOK_HEADLESS_SCREENSHOT_PAGE=TaskCategories KAPOK_HEADLESS_SCREENSHOT_SEED=1
 run_scenario selection KAPOK_HEADLESS_SCREENSHOT_PAGE=TaskLists KAPOK_HEADLESS_SCREENSHOT_SELECTION=1
