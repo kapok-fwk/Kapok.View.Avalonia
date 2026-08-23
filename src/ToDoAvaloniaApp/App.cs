@@ -1331,6 +1331,41 @@ public class App : Application
                 Console.WriteLine($"KAPOK_HEADLESS_SCREENSHOT_REPORT: culture={System.Globalization.CultureInfo.CurrentUICulture} " +
                                    $"buttons=[{string.Join(", ", buttonCaptions)}] fileTypeLabel=\"{fileTypeLabel}\"");
 
+                // Phase 8 item 7 verification: ReportParameterList's ComboBox (proposal values)
+                // and DatePicker (DateTime) editor branches, previously unverified because the
+                // only parameter in this app was a plain bool (see TaskListsReport.cs's new
+                // SortBy/GeneratedOn parameters). Finds the real rendered editor controls and
+                // drives them exactly like a user would - setting SelectedItem/SelectedDate, not
+                // touching ReportParameterViewModel.Value directly - so this proves the two-way
+                // bindings ReportParameterList.BuildEditor wires up, not just that the view models
+                // themselves compute proposal values correctly.
+                var sortByComboBox = reportWindow?.GetVisualDescendants().OfType<ComboBox>().FirstOrDefault();
+                var generatedOnDatePicker = reportWindow?.GetVisualDescendants().OfType<DatePicker>().FirstOrDefault();
+                Console.WriteLine($"KAPOK_HEADLESS_SCREENSHOT_REPORT: sortByComboBox found={sortByComboBox != null} " +
+                                   $"items=[{string.Join(", ", sortByComboBox?.ItemsSource?.Cast<object>() ?? [])}] " +
+                                   $"selected={sortByComboBox?.SelectedItem} " +
+                                   $"generatedOnDatePicker found={generatedOnDatePicker != null} " +
+                                   $"selectedDate={generatedOnDatePicker?.SelectedDate}");
+
+                if (sortByComboBox != null)
+                {
+                    sortByComboBox.SelectedItem = "IsArchived";
+                    Dispatcher.UIThread.RunJobs();
+                    Console.WriteLine($"KAPOK_HEADLESS_SCREENSHOT_REPORT: after picking 'IsArchived' " +
+                                       $"comboBoxSelected={sortByComboBox.SelectedItem} " +
+                                       $"viewModelValue={(reportPage?.ReportParameters?.FirstOrDefault(p => p.ReportParameter.Name == "SortBy"))?.Value}");
+                }
+
+                if (generatedOnDatePicker != null)
+                {
+                    var pickedDate = new DateTimeOffset(new DateTime(2026, 1, 15));
+                    generatedOnDatePicker.SelectedDate = pickedDate;
+                    Dispatcher.UIThread.RunJobs();
+                    Console.WriteLine($"KAPOK_HEADLESS_SCREENSHOT_REPORT: after picking 2026-01-15 " +
+                                       $"datePickerSelected={generatedOnDatePicker.SelectedDate} " +
+                                       $"viewModelValue={(reportPage?.ReportParameters?.FirstOrDefault(p => p.ReportParameter.Name == "GeneratedOn"))?.Value}");
+                }
+
                 var reportScreenshotPath = Environment.GetEnvironmentVariable("KAPOK_HEADLESS_SCREENSHOT") + ".report.png";
                 for (var i = 0; i < 3; i++)
                 {
@@ -1368,7 +1403,15 @@ public class App : Application
                     using var stream = new MemoryStream();
                     new global::Kapok.Report.ReportEngine(GetService<IDataDomain>()).ExecuteReport(
                         new ToDoAvaloniaApp.Report.TaskListsReport(),
-                        new Dictionary<string, object> { [nameof(ToDoAvaloniaApp.Report.TaskListsReport.IncludeArchived)] = true },
+                        new Dictionary<string, object>
+                        {
+                            [nameof(ToDoAvaloniaApp.Report.TaskListsReport.IncludeArchived)] = true,
+                            // Real values for the two new parameters (Phase 8 item 7), not just
+                            // structurally present - proves TaskListsReportProcessor genuinely
+                            // reads them back out of ParameterValues by name.
+                            [nameof(ToDoAvaloniaApp.Report.TaskListsReport.SortBy)] = "IsArchived",
+                            [nameof(ToDoAvaloniaApp.Report.TaskListsReport.GeneratedOn)] = new DateTime(2026, 1, 15)
+                        },
                         "text/csv",
                         stream);
                     Console.WriteLine($"KAPOK_HEADLESS_SCREENSHOT_REPORT: ExecuteReport produced {stream.Length} bytes:");
