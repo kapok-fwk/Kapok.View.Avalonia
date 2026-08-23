@@ -2,6 +2,8 @@ using System.Collections;
 using System.Collections.Specialized;
 using System.Diagnostics;
 using System.Globalization;
+using System.Linq.Expressions;
+using System.Windows.Input;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Templates;
@@ -84,6 +86,26 @@ public class CustomDataGrid : DataGrid
         AutoGeneratingColumn += OnAutoGeneratingColumnApplyMetadata;
         SelectionChanged += OnSelectionChangedSyncSelectedEntries;
     }
+
+    #region Lookup / drill-down sources
+
+    /// <summary>
+    /// The DataSet's per-property lookup views (<c>DataSet.Columns.LookupViews</c>) - the entries a
+    /// <see cref="DataGridLookupComboBoxColumn"/> offers. Equivalent to WPF's
+    /// <c>LookupItemsSource</c> binding, but a plain reference rather than a
+    /// <c>BindingBase</c> whose path each generated column had to re-derive as a string.
+    /// </summary>
+    public IReadOnlyDictionary<string, IPropertyLookupView>? LookupViews { get; set; }
+
+    /// <summary>
+    /// The DataSet's per-property drill-down actions (<c>DataSet.Columns.DrillDown</c>, an
+    /// <c>IReadOnlyDictionary&lt;string, IDataSetSelectionAction&lt;TEntry&gt;&gt;</c> reached here
+    /// through the non-generic <see cref="IDictionary"/>). Same role as WPF's
+    /// <c>DrillDownActionDictionary</c>.
+    /// </summary>
+    public IDictionary? DrillDownActionDictionary { get; set; }
+
+    #endregion
 
     #region Per-column filter
 
@@ -461,6 +483,26 @@ public class CustomDataGrid : DataGrid
 
     private DataGridColumn CreateBaseColumn(ColumnPropertyView columnPropertyView, Type propertyType, bool isReadOnly)
     {
+        // The Kapok-specific column kinds first, in the same precedence order as WPF's
+        // GenerateDataGridColumnExtension: hierarchy tree, lookup, drill-down.
+        if (columnPropertyView.ShowHierarchicalTree)
+            return CreateTreeColumn(columnPropertyView, isReadOnly);
+
+        if (columnPropertyView.LookupDefinition != null &&
+            LookupViews != null &&
+            LookupViews.TryGetValue(columnPropertyView.Name, out var lookupView))
+        {
+            return CreateLookupColumn(columnPropertyView, lookupView, isReadOnly);
+        }
+
+        if (columnPropertyView.DrillDownDefinition != null &&
+            DrillDownActionDictionary != null &&
+            DrillDownActionDictionary.Contains(columnPropertyView.Name))
+        {
+            return CreateDrillDownColumn(columnPropertyView, propertyType,
+                DrillDownActionDictionary[columnPropertyView.Name]);
+        }
+
         var binding = CreateCellBinding(columnPropertyView, isReadOnly);
 
         // Avalonia ships only DataGridTextColumn / DataGridCheckBoxColumn / DataGridTemplateColumn
@@ -477,6 +519,127 @@ public class CustomDataGrid : DataGrid
             return new DataGridCheckBoxColumn { Binding = binding };
 
         return new DataGridTextColumn { Binding = binding };
+    }
+
+    /// <summary>
+    /// Hierarchy tree column (<see cref="ColumnPropertyView.ShowHierarchicalTree"/>). The row items
+    /// are expected to implement <c>IHierarchyEntry&lt;TEntry&gt;</c>, whose
+    /// Level/HasChildren/IsExpanded members the column binds to - the same three bindings WPF's
+    /// CustomDataGrid wired up by hand.
+    /// </summary>
+    private DataGridColumn CreateTreeColumn(ColumnPropertyView columnPropertyView, bool isReadOnly)
+    {
+        var column = new DataGridTreeTextColumn
+        {
+            PropertyPath = BuildBindingPath(columnPropertyView),
+            StringFormat = columnPropertyView.StringFormat
+        };
+        column.BuildTemplates(isReadOnly);
+        return column;
+    }
+
+    /// <summary>
+    /// Lookup column. The key path written into the row property comes from the lookup
+    /// definition's own <c>FieldSelectorFunc</c> (exactly as WPF derived
+    /// <c>SelectedValuePath</c>), and the display path from the lookup entry type's
+    /// <c>[LookupColumn]</c> metadata.
+    /// </summary>
+    private DataGridColumn CreateLookupColumn(ColumnPropertyView columnPropertyView, IPropertyLookupView lookupView, bool isReadOnly)
+    {
+        // GetItems() (not part of the IPropertyLookupView contract - an AvaloniaPropertyLookupView
+        // addition, see its doc comment) forces the lookup's lazy first query. It is passed as a
+        // *provider*, not invoked here: this method runs inside ListPage<TEntry>.OnLoaded's column
+        // build, while the page's own DataSet is loading, and querying a second entity from there
+        // deadlocks in the shared EntityDeferredCommitService layer (hit for real - a headless run
+        // that produced no output at all). See DataGridLookupComboBoxColumn.ItemsSourceProvider.
+        Func<IEnumerable?> itemsProvider = () => (lookupView as Data.AvaloniaPropertyLookupView)?.GetItems();
+
+        var selectedValuePath = GetLookupFieldName(columnPropertyView.LookupDefinition?.FieldSelectorFunc);
+        if (string.IsNullOrEmpty(selectedValuePath))
+        {
+            // WPF logged this to Debug and carried on with an empty SelectedValuePath, producing a
+            // column that silently never resolves anything. Falling back to a plain text column is
+            // at least honest about showing the raw key.
+            Debug.WriteLine($"ERROR: FieldSelectorFunc not set in LookupDefinition for column {columnPropertyView.Name}");
+            return new DataGridTextColumn { Binding = CreateCellBinding(columnPropertyView, isReadOnly) };
+        }
+
+        var column = new DataGridLookupComboBoxColumn
+        {
+            PropertyPath = BuildBindingPath(columnPropertyView),
+            ItemsSourceProvider = itemsProvider,
+            SelectedValuePath = selectedValuePath
+            // DisplayMemberPath is left unset: it is derived from the lookup entry type's
+            // [LookupColumn] metadata, which needs the entries, which is exactly what must not be
+            // queried yet. The column resolves it on first use.
+        };
+        column.BuildTemplates(isReadOnly);
+        return column;
+    }
+
+    /// <summary>
+    /// The property name a lookup definition's <c>FieldSelectorFunc</c> selects.
+    ///
+    /// Kapok.Core's own <c>Expression.GetMemberName()</c> extension - which WPF's CustomDataGrid
+    /// called here - handles a member access wrapped in at most *one* conversion. The non-generic
+    /// <c>ILookupDefinition.FieldSelectorFunc</c> accessor wraps the typed selector's body in
+    /// another <c>Expression.Convert(..., typeof(object))</c>, so for any lookup whose field type is
+    /// already a conversion (e.g. <c>taskList =&gt; taskList.Id</c> selecting a <c>Guid?</c>) the
+    /// body arrives as Convert(Convert(member)) and GetMemberName throws NotSupportedException.
+    /// **Found by running it**: the exception surfaced as a headless run that hung with no output
+    /// at all, because it was thrown while the page was loading and ended up in the view domain's
+    /// error dialog, which pushes a nested dispatcher frame nothing can close. Unwrapping every
+    /// conversion layer here is the fix; the WPF original has the same latent limitation.
+    /// </summary>
+    private static string GetLookupFieldName(Expression<Func<object, object>>? fieldSelector)
+    {
+        Expression? body = fieldSelector?.Body;
+
+        while (body is UnaryExpression unary)
+            body = unary.Operand;
+
+        return (body as MemberExpression)?.Member.Name ?? string.Empty;
+    }
+
+    /// <summary>
+    /// Drill-down column: the cell text becomes a link running the DataSet's own drill-down action
+    /// (an <see cref="IDataSetSelectionAction{TEntry}"/> built by
+    /// <c>PropertyViewCollection.OnAdd</c>) over the grid's current selection.
+    /// </summary>
+    private DataGridColumn CreateDrillDownColumn(ColumnPropertyView columnPropertyView, Type propertyType, object? drillDownAction)
+    {
+        var column = new DataGridHyperlinkCommandColumn
+        {
+            PropertyPath = BuildBindingPath(columnPropertyView),
+            StringFormat = columnPropertyView.StringFormat,
+            AlignRight = propertyType.IsNumericType() && !(Nullable.GetUnderlyingType(propertyType) ?? propertyType).IsEnum,
+            Command = drillDownAction == null ? null : CreateSelectionCommand(drillDownAction),
+            // WPF bound this to CustomDataGrid.SelectedItems; here the same selection is available
+            // as the bindable SelectedEntries (see item 2 - SelectedItems has no AvaloniaProperty).
+            CommandParameterBinding = new Binding(nameof(SelectedEntries)) { Source = this }
+        };
+        column.BuildTemplates();
+        return column;
+    }
+
+    /// <summary>
+    /// Wraps an <c>IDataSetSelectionAction&lt;TEntry&gt;</c> as an ICommand. The closed generic is
+    /// only known at runtime, so this goes through the same reflection step RibbonMenuBuilder's
+    /// table-data buttons use - once per column build, not per click.
+    /// </summary>
+    private static ICommand? CreateSelectionCommand(object action)
+    {
+        var actionInterface = action.GetType().GetInterfaces()
+            .FirstOrDefault(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IAction<>));
+
+        if (actionInterface == null)
+            return null;
+
+        var forGeneric = typeof(ValueConverter.ActionCommand)
+            .GetMethod(nameof(ValueConverter.ActionCommand.ForGeneric))!
+            .MakeGenericMethod(actionInterface.GetGenericArguments()[0]);
+
+        return (ICommand?)forGeneric.Invoke(null, new[] { action });
     }
 
     /// <summary>
@@ -574,7 +737,10 @@ public class CustomDataGrid : DataGrid
             ? new DataGridLength(columnPropertyView.Width.Value)
             : DataGridLength.Auto;
 
-        if (propertyType != null)
+        // A lookup column's cell shows the referenced entry's *display* text, not the key, so the
+        // key's own type must not drive the cell styling (a Guid key was getting the
+        // ellipsis-trimming class meant for raw Guids).
+        if (propertyType != null && column is not DataGridLookupComboBoxColumn)
         {
             var underlyingType = Nullable.GetUnderlyingType(propertyType) ?? propertyType;
 

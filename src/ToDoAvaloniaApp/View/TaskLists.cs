@@ -1,4 +1,5 @@
 using Kapok.BusinessLayer;
+using Kapok.Entity.Model;
 using Kapok.View;
 using ToDoAvaloniaApp.DataModel;
 using Task = ToDoAvaloniaApp.DataModel.Task;
@@ -17,7 +18,15 @@ public class TaskLists : ListPage<TaskList>
             Name = "Standard",
             Columns = new List<ColumnPropertyView>
             {
+                // Phase 7 item 4: the drill-down column. A DrillDownDefinition makes
+                // CustomDataGrid generate a DataGridHyperlinkCommandColumn - the name renders as a
+                // link that opens the Tasks page filtered to this list, the same thing the
+                // Ribbon's "Tasks" button does, but reachable straight from the row.
                 new(nameof(TaskList.Name))
+                {
+                    DrillDownDefinition = new DrillDownDefinition<Task, TaskList>(typeof(Tasks),
+                        (filter, taskList, _) => filter.AddPropertyFilter(nameof(Task.TaskListId), taskList.Id))
+                }
             }
         });
 

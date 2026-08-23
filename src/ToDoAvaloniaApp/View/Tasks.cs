@@ -26,6 +26,12 @@ public class Tasks : ListPage<Task>
                 new(nameof(Task.Description)) { Width = 200, TextWrap = true },
                 new(nameof(Task.EstimatedTime)) { Width = 90 },
                 new(nameof(Task.DueDate)) { Width = 110 },
+                // Phase 7 item 4: the lookup column. Its LookupDefinition is what makes
+                // CustomDataGrid generate a DataGridLookupComboBoxColumn instead of a plain text
+                // column - the cell shows the referenced TaskList's Name rather than the raw
+                // TaskListId Guid, and (when the page is editable) edits through a real
+                // LookupComboBox whose dropdown is a TaskList grid.
+                new(nameof(Task.TaskListId)) { Width = 120, LookupDefinition = TaskLookupDefinitions.TaskListLookup() },
                 // Proves IsHidden really suppresses a column: the property is part of the list
                 // view, but must not appear in the grid.
                 new(nameof(Task.Id)) { IsHidden = true },

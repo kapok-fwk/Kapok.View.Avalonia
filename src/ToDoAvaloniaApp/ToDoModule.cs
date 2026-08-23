@@ -18,6 +18,8 @@ public class ToDoModule : ModuleBase
         // data model registration
         DataDomain.RegisterEntity<Task, TaskService>();
         DataDomain.RegisterEntity<TaskList>();
+        // Phase 7 item 4: the hierarchical showcase entity (see DataModel/TaskCategory.cs).
+        DataDomain.RegisterEntity<TaskCategory>();
 
         // Phase 5 Report/ item's real usage: ReportModule registers Kapok.Report's own entities
         // (ReportModel/ReportLayout/ReportDesign/...) into the same DataDomain - DbContextBase
@@ -33,6 +35,7 @@ public class ToDoModule : ModuleBase
         // register default pages for data models
         ViewDomain.RegisterEntityDefaultPage<Task>(typeof(Tasks));
         ViewDomain.RegisterEntityDefaultPage<TaskList>(typeof(TaskLists));
+        ViewDomain.RegisterEntityDefaultPage<TaskCategory>(typeof(TaskCategories));
 
         // MainPage is a plain InteractivePage (see View/MainPage.cs) - it doesn't match any of
         // AvaloniaViewDomain.ConstructWindow's IListPage/IDialogPage/ICardPage fallbacks, so it

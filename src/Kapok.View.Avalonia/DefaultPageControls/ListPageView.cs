@@ -54,8 +54,7 @@ public class ListPageView : UserControl
             // IDataSetSelectionAction<TEntry> - DeleteEntryAction, EditEntryAction, the Ribbon's
             // table-data buttons - takes a *list* of entries, so multi-selection is the contract,
             // not an optional extra.
-            SelectionMode = DataGridSelectionMode.Extended,
-            IsReadOnly = true // cell editing is Excel-navigation territory, not built yet
+            SelectionMode = DataGridSelectionMode.Extended
         };
         Content = _dataGrid;
 
@@ -81,6 +80,19 @@ public class ListPageView : UserControl
         if (collectionProperty?.GetValue(dataSet) is IEnumerable collection)
             _dataGrid.ItemsSource = collection;
 
+        // Read-only state follows the page, matching WPF's TableDataDataGrid style
+        // (IsReadOnly = {Binding IsEditable, Converter=InverseBoolean}). Phase 4's baseline pinned
+        // this to true because no editor existed yet; the lookup column (item 4) has a real one, so
+        // the grid now honours DataPage.IsEditable like the WPF version always did. Bound before
+        // ColumnsSource: the column generator reads IsReadOnly while building each column.
+        _dataGrid.Bind(DataGrid.IsReadOnlyProperty,
+            new Binding(nameof(IDataPage.IsEditable))
+            {
+                Source = dataPage,
+                Mode = BindingMode.OneWay,
+                Converter = new InverseBooleanConverter()
+            });
+
         // Per-column filter (item 3): bound before ColumnsSource so the header filter inputs can
         // resolve their view models as soon as the first column headers are realized.
         // DataSet.Filter is created in DataSetView's constructor, so UserLayer is always available
@@ -97,6 +109,22 @@ public class ListPageView : UserControl
         // concrete ListPage<TEntry>, not on IDataPage.
         if (dataPage.GetType().GetProperty("ToggleFilterVisibleAction")?.GetValue(dataPage) is IToggleAction toggleFilterVisibleAction)
             toggleFilterVisibleAction.IsVisible = true;
+
+        // Lookup / drill-down sources (item 4), also before ColumnsSource - the column generator
+        // reads both while building each column. Equivalent to WPF's LookupItemsSource /
+        // DrillDownActionDictionary bindings on its CustomDataGrid.
+        //
+        // Both collections are live references owned by PropertyViewCollection<TEntity>, which
+        // fills them in its OnAdd *before* raising CollectionChanged - so assigning them once here,
+        // even while DataSet.Columns is still empty, is enough: by the time a column is generated,
+        // its lookup view / drill-down action is already registered.
+        _dataGrid.LookupViews = dataSet.Columns.LookupViews;
+
+        // DrillDown is declared on the closed generic IPropertyViewCollection<TEntity> only (the
+        // non-generic interface carries LookupViews but not DrillDown), so it is read by name -
+        // same reflection-by-necessity as the Collection lookup above.
+        _dataGrid.DrillDownActionDictionary =
+            dataSet.Columns.GetType().GetProperty(nameof(IPropertyViewCollection<object>.DrillDown))?.GetValue(dataSet.Columns) as IDictionary;
 
         // Kapok's own column metadata - the same binding WPF's TableDataDataGrid style used.
         // It is normally still empty at this point (ListPage<TEntry> populates DataSet.Columns in

@@ -1,0 +1,92 @@
+using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
+using Kapok.Entity;
+
+namespace ToDoAvaloniaApp.DataModel;
+
+/// <summary>
+/// A category a task can belong to, organised as a tree (a category can have a parent category).
+///
+/// Added for Phase 7 item 4: <see cref="ColumnPropertyView.ShowHierarchicalTree"/> makes
+/// CustomDataGrid generate a DataGridTreeTextColumn, which binds to the
+/// <see cref="IHierarchyEntry{TEntry}"/> members Level/HasChildren/IsExpanded. Nothing else in
+/// ToDoAvaloniaApp is hierarchical, so without this entity that column could only be verified by
+/// reading the code.
+/// </summary>
+[Display(Name = "Task category")]
+public class TaskCategory : EditableEntityBase, IHierarchyEntry<TaskCategory>
+{
+    // Client-generated - see TaskList.Id's comment on why an all-zero Guid primary key breaks row
+    // identity in the DataGrid.
+    private Guid _id = Guid.NewGuid();
+    private string _name = string.Empty;
+    private Guid? _parentId;
+    private int _level;
+    private bool _isExpanded = true;
+    private bool _isVisible = true;
+    private bool _hasChildren;
+
+    [Key]
+    [Display(Name = nameof(Id))]
+    [DatabaseGenerated(DatabaseGeneratedOption.None)]
+    public Guid Id
+    {
+        get => _id;
+        set => SetValidateProperty(ref _id, value);
+    }
+
+    [Required(AllowEmptyStrings = false)]
+    [Display(Name = "Category", Description = "Name of the category; nested categories are shown indented.")]
+    [LookupColumn]
+    public string Name
+    {
+        get => _name;
+        set => SetValidateProperty(ref _name, value);
+    }
+
+    [Display(Name = "Parent category")]
+    [ForeignKey(nameof(Parent))]
+    public Guid? ParentId
+    {
+        get => _parentId;
+        set => SetValidateProperty(ref _parentId, value);
+    }
+
+    #region IHierarchyEntry<TaskCategory>
+
+    public TaskCategory Parent { get; set; } = null!;
+
+    [Display(Name = "Level")]
+    public int Level
+    {
+        get => _level;
+        set => SetValidateProperty(ref _level, value);
+    }
+
+    [NotMapped]
+    public bool IsExpanded
+    {
+        get => _isExpanded;
+        set => SetValidateProperty(ref _isExpanded, value);
+    }
+
+    [NotMapped]
+    public bool IsVisible
+    {
+        get => _isVisible;
+        set => SetValidateProperty(ref _isVisible, value);
+    }
+
+    [NotMapped]
+    public bool HasChildren
+    {
+        get => _hasChildren;
+        set => SetValidateProperty(ref _hasChildren, value);
+    }
+
+    public Func<TaskCategory, bool> GetChildrenPredicate() => category => category.ParentId == Id;
+
+    #endregion
+
+    public override string ToString() => $"Task category {Name}";
+}

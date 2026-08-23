@@ -99,6 +99,7 @@ public class App : Application
                 services.AddTransient<MainPage>();
                 services.AddTransient<TaskLists>();
                 services.AddTransient<Tasks>();
+                services.AddTransient<TaskCategories>();
                 services.AddTransient<TestPage>();
             }).Build();
 
@@ -140,6 +141,7 @@ public class App : Application
             "TaskLists" => GetService<TaskLists>(),
             "TaskListsReload" => GetService<TaskLists>(),
             "Tasks" => GetService<Tasks>(),
+            "TaskCategories" => GetService<TaskCategories>(),
             "TaskCard" => GetService<Tasks>(),
             "TestPage" => GetService<TestPage>(),
             _ => GetService<MainPage>()
@@ -214,6 +216,34 @@ public class App : Application
                 // would create the Task but skip opening TaskCard entirely.
                 ((IDataPage)page).CreateNewEntryAction.Execute();
             }
+            else if (page is TaskCategories)
+            {
+                // Phase 7 item 4: a real three-level category tree, so the hierarchy tree column
+                // has genuine Level/HasChildren/IsExpanded values to render (indentation,
+                // connector lines, expanders on the two parents only).
+                var categories = new (string Name, int Level, bool HasChildren)[]
+                {
+                    ("Home", 0, true),
+                    ("Kitchen", 1, true),
+                    ("Groceries", 2, false),
+                    ("Garden", 1, false),
+                    ("Work", 0, false)
+                };
+
+                DataModel.TaskCategory? parentLevel0 = null;
+                DataModel.TaskCategory? parentLevel1 = null;
+                foreach (var (categoryName, level, hasChildren) in categories)
+                {
+                    dataSet.CreateNewEntryAction.Execute();
+                    var category = (DataModel.TaskCategory)dataSet.Current!;
+                    category.Name = categoryName;
+                    category.Level = level;
+                    category.HasChildren = hasChildren;
+                    category.ParentId = level switch { 1 => parentLevel0?.Id, 2 => parentLevel1?.Id, _ => null };
+                    if (level == 0) parentLevel0 = category;
+                    if (level == 1) parentLevel1 = category;
+                }
+            }
             else
             {
                 dataSet.CreateNewEntryAction.Execute();
@@ -232,6 +262,16 @@ public class App : Application
 
                 if (page is Tasks && dataSet.Current is DataModel.Task newTask)
                 {
+                    // A real TaskList to reference, so the lookup column (Phase 7 item 4) has
+                    // something to resolve - saved through TaskLists' own DataSet, since the
+                    // lookup queries through a separate data-domain scope (same rule Phase 5
+                    // found for TaskCard's LookupComboBox).
+                    var taskListsDataSet = GetService<TaskLists>().DataSet!;
+                    taskListsDataSet.CreateNewEntryAction.Execute();
+                    taskListsDataSet.Current!.Name = "Groceries";
+                    taskListsDataSet.Save();
+
+                    newTask.TaskListId = taskListsDataSet.Current.Id;
                     newTask.Name = "Buy milk";
                     newTask.Description = "Two litres of whole milk, plus oat milk if the shop has any left.";
                     newTask.EstimatedTime = 1.25m;
@@ -255,6 +295,9 @@ public class App : Application
                               $"columnsSourceCount={listGrid?.ColumnsSource?.Count} columns={listGrid?.Columns.Count} " +
                               $"items={listGrid?.ItemsSource?.Cast<object>().Count()} " +
                               $"realizedRows={listGrid?.GetVisualDescendants().OfType<DataGridRow>().Count()}");
+            Console.WriteLine("KAPOK_DUMP_COLUMNS: renderedCells=[" +
+                              string.Join(" | ", (listGrid?.GetVisualDescendants().OfType<DataGridRow>() ?? [])
+                                  .Select(r => string.Join(" / ", r.GetVisualDescendants().OfType<TextBlock>().Select(t => t.Text)))) + "]");
             foreach (var column in listGrid?.Columns ?? new System.Collections.ObjectModel.ObservableCollection<DataGridColumn>())
             {
                 var columnViewModel = DataGridColumnExtensions.GetColumnViewModel(column) as ColumnPropertyView;
@@ -490,6 +533,92 @@ public class App : Application
                     Dispatcher.UIThread.RunJobs();
                     Console.WriteLine($"KAPOK_FILTER: after clearing it rows=[{Rows()}] {FilterState()}");
                 }
+            }
+        }
+
+        // Phase 7 item 4 verification: the drill-down column's link actually runs the DataSet's
+        // drill-down action. A screenshot can show a blue underlined cell; only executing the cell's
+        // real command proves it opens the referenced page filtered to the selected entries.
+        if (Environment.GetEnvironmentVariable("KAPOK_HEADLESS_SCREENSHOT_DRILLDOWN") == "1" &&
+            page is TaskLists drillDownPage && drillDownPage.DataSet is { } drillDownDataSet)
+        {
+            // Two lists, and one Task in the first - so a drill-down that ignored the filter would
+            // be visibly different from one that applied it.
+            drillDownDataSet.CreateNewEntryAction.Execute();
+            var groceries = drillDownDataSet.Current!;
+            groceries.Name = "Groceries";
+            drillDownDataSet.CreateNewEntryAction.Execute();
+            drillDownDataSet.Current!.Name = "Hardware";
+            drillDownDataSet.Save();
+
+            var tasksDataSet = GetService<Tasks>().DataSet!;
+            tasksDataSet.CreateNewEntryAction.Execute();
+            tasksDataSet.Current!.Name = "Buy milk";
+            tasksDataSet.Current.TaskListId = groceries.Id;
+            tasksDataSet.Save();
+
+            Dispatcher.UIThread.RunJobs();
+
+            var drillGrid = lastOpenedWindow!.GetVisualDescendants().OfType<CustomDataGrid>().First();
+            drillGrid.SelectedItems.Clear();
+            drillGrid.SelectedItems.Add(drillGrid.ItemsSource!.Cast<object>().First(o => ((DataModel.TaskList)o).Name == "Groceries"));
+            Dispatcher.UIThread.RunJobs();
+
+            // The link is the Button the DataGridHyperlinkCommandColumn's cell template builds.
+            var linkButton = drillGrid.GetVisualDescendants().OfType<DataGridCell>()
+                .SelectMany(c => c.GetVisualDescendants().OfType<Button>())
+                .FirstOrDefault();
+
+            Console.WriteLine($"KAPOK_DRILLDOWN: link found={linkButton != null} " +
+                              $"canExecute={linkButton?.Command?.CanExecute(linkButton.CommandParameter)} " +
+                              $"parameter={(linkButton?.CommandParameter as System.Collections.IList)?.Count}");
+
+            var windowsBefore = lastOpenedWindow;
+            linkButton?.Command?.Execute(linkButton.CommandParameter);
+            Dispatcher.UIThread.RunJobs();
+
+            var openedPage = (lastOpenedWindow == windowsBefore ? null : lastOpenedWindow?.DataContext) as IDataPage;
+            var openedRows = openedPage?.DataSet is { } openedDataSet
+                ? string.Join(", ", openedDataSet.AsQueryable().Cast<object>().ToList().Select(o => (o as DataModel.Task)?.Name))
+                : "<no page opened>";
+            Console.WriteLine($"KAPOK_DRILLDOWN: openedPage={openedPage?.GetType().Name} rows=[{openedRows}]");
+        }
+
+        // Phase 7 item 4 verification: the lookup column's *editing* template. The read-only cell
+        // showing "Groceries" instead of a Guid is visible in the Tasks screenshot; this proves the
+        // editor is a real LookupComboBox over the real lookup entries, bound to the row's key.
+        if (Environment.GetEnvironmentVariable("KAPOK_HEADLESS_SCREENSHOT_LOOKUP_EDIT") == "1" &&
+            page is Tasks lookupEditPage)
+        {
+            Dispatcher.UIThread.RunJobs();
+
+            var lookupGrid = lastOpenedWindow!.GetVisualDescendants().OfType<CustomDataGrid>().First();
+            var lookupColumn = lookupGrid.Columns.OfType<DataGridLookupComboBoxColumn>().FirstOrDefault();
+
+            Console.WriteLine($"KAPOK_LOOKUP_EDIT: isEditable={lookupEditPage.IsEditable} gridReadOnly={lookupGrid.IsReadOnly} " +
+                              $"lookupColumn={lookupColumn?.GetType().Name} columnReadOnly={lookupColumn?.IsReadOnly} " +
+                              $"selectedValuePath={lookupColumn?.SelectedValuePath}");
+
+            if (lookupColumn != null)
+            {
+                lookupGrid.SelectedIndex = 0;
+                lookupGrid.CurrentColumn = lookupColumn;
+                lookupGrid.BeginEdit();
+                for (var i = 0; i < 3; i++)
+                {
+                    Dispatcher.UIThread.RunJobs();
+                    AvaloniaHeadlessPlatform.ForceRenderTimerTick();
+                }
+
+                var editor = lookupGrid.GetVisualDescendants().OfType<LookupComboBox>().FirstOrDefault();
+                Console.WriteLine($"KAPOK_LOOKUP_EDIT: editor={editor?.GetType().Name} " +
+                                  $"items=[{string.Join(", ", editor?.ItemsSource?.Cast<object>().Select(o => (o as DataModel.TaskList)?.Name) ?? [])}] " +
+                                  $"selectedValue={editor?.SelectedValue} selectedItem={(editor?.SelectedItem as DataModel.TaskList)?.Name}");
+
+                var editPath = Environment.GetEnvironmentVariable("KAPOK_HEADLESS_SCREENSHOT") + ".lookup-edit.png";
+                using (var frame = lastOpenedWindow.CaptureRenderedFrame())
+                    frame?.Save(editPath);
+                Console.WriteLine($"KAPOK_LOOKUP_EDIT: saved screenshot to {editPath}");
             }
         }
 

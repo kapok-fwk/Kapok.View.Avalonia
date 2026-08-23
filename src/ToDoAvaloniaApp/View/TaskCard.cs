@@ -24,14 +24,10 @@ public class TaskCard : CardPage<Task>, IDropTargetOnPage
     {
         Title = "Task";
 
-        // The lookup entries don't depend on the current Task (any TaskList is a valid choice),
-        // so the entry-independent LookupDefinition overload is used - matches
-        // Kapok.Entity.Model.ILookupDefinition.EntriesFuncDependentOnEntry = false.
+        // Shared with the Tasks list page's own lookup column - see TaskLookupDefinitions.
         PropertyViewDefinitions.Add(new PropertyView(nameof(Task.TaskListId))
         {
-            LookupDefinition = new LookupDefinition<Task, TaskList, Guid?>(
-                scope => scope.GetEntityService<TaskList>().AsQueryable().ToList(),
-                taskList => taskList.Id)
+            LookupDefinition = TaskLookupDefinitions.TaskListLookup()
         });
     }
 
