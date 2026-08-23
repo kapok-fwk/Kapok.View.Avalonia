@@ -1,5 +1,6 @@
 using System.Collections;
 using System.Collections.Specialized;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.Linq.Expressions;
@@ -101,10 +102,121 @@ public class CustomDataGrid : DataGrid
         AddHandler(PointerMovedEvent, OnPointerMovedDragRow, RoutingStrategies.Tunnel);
         AddHandler(PointerReleasedEvent, OnPointerReleasedDropRow, RoutingStrategies.Tunnel);
 
+        LoadingRow += OnLoadingRowApplyEntityColors;
+        UnloadingRow += OnUnloadingRowReleaseEntityColors;
+        AddHandler(PointerPressedEvent, OnPointerPressedActivateRow, RoutingStrategies.Tunnel);
+
         PreparingCellForEdit += OnPreparingCellForEditTrackEditing;
         CellEditEnded += OnCellEditEndedTrackEditing;
         CurrentCellChanged += OnCurrentCellChangedBeginEdit;
     }
+
+    #region Row styling & activation (DataGridStyling.xaml's functional parts)
+
+    /// <summary>
+    /// The DataSet the grid asks for per-entity row colours - Kapok's <c>EntryColoring</c> feature,
+    /// where business logic decides a row's foreground/background (e.g. overdue rows in red).
+    ///
+    /// WPF expressed this as a <c>MultiBinding</c> with a <c>DataSetEntityColorConverter</c> inside
+    /// <c>CustomDataGridRowStyle</c>'s triggers, one per state (normal / alternating / selected /
+    /// selected border). Avalonia's DataGrid raises <see cref="DataGrid.LoadingRow"/> for every
+    /// realized row, which is a direct place to set the colours - no converter, no multi-binding,
+    /// and it re-runs whenever a row is recycled onto a different entity.
+    /// </summary>
+    public Data.IAvaloniaDataSetView? ColoringDataSet { get; set; }
+
+    /// <summary>Rows currently subscribed to their entity's PropertyChanged, for re-colouring.</summary>
+    private readonly Dictionary<DataGridRow, PropertyChangedEventHandler> _rowColorSubscriptions = new();
+
+    private void OnLoadingRowApplyEntityColors(object? sender, DataGridRowEventArgs e)
+    {
+        ApplyEntityColors(e.Row);
+
+        // Colour rules read entity properties, so an edit has to re-colour the row. WPF got this
+        // for free (its colours were MultiBindings that re-evaluated), and it also matters at
+        // startup: a row is realized when it is added to the collection, which for a newly created
+        // entry is *before* the business layer has filled anything in.
+        if (e.Row.DataContext is not INotifyPropertyChanged notifying || _rowColorSubscriptions.ContainsKey(e.Row))
+            return;
+
+        var row = e.Row;
+        PropertyChangedEventHandler handler = (_, _) => ApplyEntityColors(row);
+        notifying.PropertyChanged += handler;
+        _rowColorSubscriptions[row] = handler;
+    }
+
+    private void OnUnloadingRowReleaseEntityColors(object? sender, DataGridRowEventArgs e)
+    {
+        if (!_rowColorSubscriptions.Remove(e.Row, out var handler))
+            return;
+
+        if (e.Row.DataContext is INotifyPropertyChanged notifying)
+            notifying.PropertyChanged -= handler;
+    }
+
+    private void ApplyEntityColors(DataGridRow row)
+    {
+        var dataSet = ColoringDataSet;
+        var entity = row.DataContext;
+        if (dataSet == null || entity == null)
+            return;
+
+        // ClearValue, not "assign null": a local null wins over the theme, so clearing the
+        // foreground that way makes the row's text invisible rather than restoring the default
+        // (confirmed from a screenshot - every uncoloured cell rendered blank). Same trap the filter
+        // input's border hit in item 3. Clearing still matters, because rows are recycled onto
+        // different entities.
+        var background = dataSet.GetBackgroundColorOfEntity(entity);
+        if (background.HasValue)
+            row.Background = new SolidColorBrush(ToAvaloniaColor(background.Value));
+        else
+            row.ClearValue(TemplatedControl.BackgroundProperty);
+
+        var foreground = dataSet.GetForegroundColorOfEntity(entity);
+        if (foreground.HasValue)
+            row.Foreground = new SolidColorBrush(ToAvaloniaColor(foreground.Value));
+        else
+            row.ClearValue(TemplatedControl.ForegroundProperty);
+    }
+
+    /// <summary>
+    /// <c>DataSetEntityColoringEventArgs</c> carries <c>System.Drawing.Color</c> (it lives in core
+    /// Kapok.View, which is UI-framework-agnostic), so it has to be converted to Avalonia's own
+    /// colour type - the same conversion WPF's DataSetEntityColorConverter did to
+    /// <c>System.Windows.Media.Color</c>.
+    /// </summary>
+    private static Color ToAvaloniaColor(System.Drawing.Color color)
+        => Color.FromArgb(color.A, color.R, color.G, color.B);
+
+    /// <summary>
+    /// Invoked when a row is activated (double-clicked). WPF wired this through an
+    /// <c>InteractivityItems</c> EventTrigger on its row style, resolving a
+    /// <c>ListControlEntryMouseDoubleClickCommand</c> by reflection over
+    /// <c>IListPage&lt;TEntry&gt;</c>/<c>IDetailListPage&lt;,&gt;</c> - all of which existed only to
+    /// call the page's OpenCardPageAction with the double-clicked entry. A plain callback the host
+    /// assigns does the same thing without the reflection detour (see ListPageView).
+    /// </summary>
+    public Action<object>? RowActivated { get; set; }
+
+    private void OnPointerPressedActivateRow(object? sender, PointerPressedEventArgs e)
+    {
+        if (RowActivated == null || e.ClickCount != 2)
+            return;
+
+        var entity = FindRow(e)?.DataContext;
+        if (entity == null)
+            return;
+
+        // Make the activated row current first. Everything downstream (the card page the host opens
+        // shares the list's DataSet, so it shows DataSet.Current) acts on the current entry, and a
+        // double-click must act on the row that was double-clicked - not on whatever happened to be
+        // current beforehand.
+        SetCurrentValue(SelectedItemProperty, entity);
+
+        RowActivated(entity);
+    }
+
+    #endregion
 
     #region Excel-style cell navigation
 

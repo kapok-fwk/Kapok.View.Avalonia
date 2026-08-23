@@ -1,7 +1,23 @@
+using System.Drawing;
 using Kapok.BusinessLayer;
 using Kapok.Data;
 
 namespace Kapok.View.Avalonia.Data;
+
+/// <summary>
+/// The colour hooks a view needs from a DataSet. Mirrors <c>IWpfDataSetView</c> - the entity-level
+/// colouring feature itself (the <c>EntryColoring</c> event and
+/// <see cref="DataSetEntityColoringEventArgs"/>) is framework-agnostic and lives in core
+/// <c>Kapok.View</c>; only these four "ask the DataSet what colour this entity should be"
+/// accessors are per-UI, because the core DataSetView keeps <c>RaiseEntryColoring</c> protected.
+/// </summary>
+public interface IAvaloniaDataSetView : IDataSetView
+{
+    Color? GetForegroundColorOfEntity(object entity, string? propertyName = null);
+    Color? GetBackgroundColorOfEntity(object entity, string? propertyName = null);
+    Color? GetForegroundSelectedColorOfEntity(object entity, string? propertyName = null);
+    Color? GetBackgroundSelectedColorOfEntity(object entity, string? propertyName = null);
+}
 
 /// <summary>
 /// The DataSet view this module hands out, replacing the plain core
@@ -28,7 +44,7 @@ namespace Kapok.View.Avalonia.Data;
 /// (<c>FilterView</c> is declared nullable in the core contract precisely so a UI without that
 /// popup can leave it unset). Both are left out rather than ported without a caller.
 /// </summary>
-public class AvaloniaDataSetView<TEntry> : DataSetView<TEntry>
+public class AvaloniaDataSetView<TEntry> : DataSetView<TEntry>, IAvaloniaDataSetView
     where TEntry : class, new()
 {
     public AvaloniaDataSetView(IServiceProvider serviceProvider, IDataDomainScope dataDomainScope,
@@ -40,4 +56,30 @@ public class AvaloniaDataSetView<TEntry> : DataSetView<TEntry>
     protected override bool CanToggleFilterVisible() => true;
 
     protected override void ToggleFilterVisible() => IsFilterVisible = !IsFilterVisible;
+
+    #region Entity colouring
+
+    private DataSetEntityColoringEventArgs? Ask(object entity, string? propertyName)
+    {
+        if (entity is not TEntry typedEntity)
+            return null;
+
+        var args = new DataSetEntityColoringEventArgs(typedEntity, propertyName);
+        RaiseEntryColoring(args);
+        return args;
+    }
+
+    public Color? GetForegroundColorOfEntity(object entity, string? propertyName = null)
+        => Ask(entity, propertyName)?.ForegroundColor;
+
+    public Color? GetBackgroundColorOfEntity(object entity, string? propertyName = null)
+        => Ask(entity, propertyName)?.BackgroundColor;
+
+    public Color? GetForegroundSelectedColorOfEntity(object entity, string? propertyName = null)
+        => Ask(entity, propertyName)?.ForegroundSelectedColor;
+
+    public Color? GetBackgroundSelectedColorOfEntity(object entity, string? propertyName = null)
+        => Ask(entity, propertyName)?.BackgroundSelectedColor;
+
+    #endregion
 }

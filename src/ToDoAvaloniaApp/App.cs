@@ -899,6 +899,67 @@ public class App : Application
             navGrid.PauseExcelNavigation = false;
         }
 
+        // DataGridStyling audit verification: per-entity row colouring and row activation
+        // (double-click), the two genuinely functional pieces of WPF's DataGridStyling.xaml.
+        if (Environment.GetEnvironmentVariable("KAPOK_HEADLESS_SCREENSHOT_ROW_STYLE") == "1" &&
+            page is Tasks styledPage && styledPage.DataSet is { } styledDataSet)
+        {
+            // Not editable, so a double-click opens the card page instead of editing in place -
+            // exactly the condition WPF's ListControlEntryMouseDoubleClickCommand checks.
+            styledPage.Editable = false;
+
+            var seedRows = new (string Name, DataModel.TaskPriority Priority, DateTime? Due)[]
+            {
+                ("Normal task", DataModel.TaskPriority.Normal, null),
+                ("Urgent task", DataModel.TaskPriority.Urgent, null),
+                ("Overdue task", DataModel.TaskPriority.Low, new DateTime(2020, 1, 1))
+            };
+            foreach (var (taskName, priority, due) in seedRows)
+            {
+                styledDataSet.CreateNewEntryAction.Execute();
+                styledDataSet.Current!.Name = taskName;
+                styledDataSet.Current.Priority = priority;
+                styledDataSet.Current.DueDate = due;
+            }
+
+            for (var i = 0; i < 5; i++)
+            {
+                Dispatcher.UIThread.RunJobs();
+                AvaloniaHeadlessPlatform.ForceRenderTimerTick();
+            }
+
+            var styledGrid = lastOpenedWindow!.GetVisualDescendants().OfType<CustomDataGrid>().First();
+            Console.WriteLine($"KAPOK_ROW_STYLE: coloringDataSet={styledGrid.ColoringDataSet?.GetType().Name} " +
+                              $"isEditable={styledPage.IsEditable} gridReadOnly={styledGrid.IsReadOnly}");
+            foreach (var styledRow in styledGrid.GetVisualDescendants().OfType<DataGridRow>().OrderBy(r => r.Bounds.Y))
+            {
+                Console.WriteLine($"KAPOK_ROW_STYLE:   row={(styledRow.DataContext as DataModel.Task)?.Name} " +
+                                  $"background={(styledRow.Background as global::Avalonia.Media.SolidColorBrush)?.Color.ToString() ?? "<none>"}");
+            }
+
+            var rowColorsPath = Environment.GetEnvironmentVariable("KAPOK_HEADLESS_SCREENSHOT") + ".row-colors.png";
+            using (var frame = lastOpenedWindow.CaptureRenderedFrame())
+                frame?.Save(rowColorsPath);
+            Console.WriteLine($"KAPOK_ROW_STYLE: saved row-colours screenshot to {rowColorsPath}");
+
+            // Row activation: a double-click on a row must open its card page.
+            var activateRow = styledGrid.GetVisualDescendants().OfType<DataGridRow>()
+                .First(r => ((DataModel.Task)r.DataContext!).Name == "Urgent task");
+            var windowBefore = lastOpenedWindow;
+            var activatePoint = activateRow.TranslatePoint(new Point(20, activateRow.Bounds.Height / 2), lastOpenedWindow) ?? default;
+
+            activateRow.RaiseEvent(new PointerPressedEventArgs(activateRow,
+                new global::Avalonia.Input.Pointer(0, PointerType.Mouse, isPrimary: true),
+                lastOpenedWindow, activatePoint, 0,
+                new PointerPointProperties(RawInputModifiers.LeftMouseButton, PointerUpdateKind.LeftButtonPressed),
+                KeyModifiers.None, clickCount: 2));
+
+            Dispatcher.UIThread.RunJobs();
+            var activatedPage = lastOpenedWindow == windowBefore ? null : lastOpenedWindow?.DataContext;
+            Console.WriteLine($"KAPOK_ROW_STYLE: double-click openedPage={activatedPage?.GetType().Name ?? "<none>"} " +
+                              $"entry={((activatedPage as IDataPage)?.DataSet?.Current as DataModel.Task)?.Name}");
+        }
+
         // Phase 5 verification: proves LookupComboBox's dropdown DataGrid actually renders real
         // lookup rows, not just that the (closed) combo box exists. Opens the dropdown on
         // whichever LookupComboBox is in the just-shown window's visual tree, after the seed

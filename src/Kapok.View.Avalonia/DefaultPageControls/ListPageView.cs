@@ -4,6 +4,7 @@ using Avalonia.Data;
 using Avalonia.Input;
 using Avalonia.Markup.Xaml.Styling;
 using Kapok.View.Avalonia.Controls;
+using Kapok.View.Avalonia.Data;
 using Kapok.View.Avalonia.ValueConverter;
 
 namespace Kapok.View.Avalonia.DefaultPageControls;
@@ -76,6 +77,8 @@ public class ListPageView : UserControl
         if (readonlyGenericInterface == null)
             return;
 
+        var entryType = readonlyGenericInterface.GetGenericArguments()[0];
+
         var collectionProperty = readonlyGenericInterface.GetProperty(nameof(IDataSetReadonlyView<object>.Collection));
         if (collectionProperty?.GetValue(dataSet) is IEnumerable collection)
             _dataGrid.ItemsSource = collection;
@@ -93,12 +96,41 @@ public class ListPageView : UserControl
                 Converter = new InverseBooleanConverter()
             });
 
+        // Per-entity row colouring (DataGridStyling.xaml's CustomDataGridRowStyle) - the DataSet
+        // decides a row's colours through Kapok's EntryColoring event.
+        _dataGrid.ColoringDataSet = dataSet as IAvaloniaDataSetView;
+
+        // Double-clicking a row opens its card page, matching WPF's
+        // ListControlEntryMouseDoubleClickCommand: only when the page is *not* editable (an
+        // editable list edits in place instead), and through the page's own OpenCardPageAction.
+        // Declared on the concrete ListPage<TEntry>, so resolved by name like the actions above.
+        var openCardPageProperty = dataPage.GetType().GetProperty("OpenCardPageAction");
+        if (openCardPageProperty != null)
+        {
+            _dataGrid.RowActivated = entity =>
+            {
+                if (dataPage.IsEditable)
+                    return;
+
+                if (openCardPageProperty.GetValue(dataPage) is not { } openCardPageAction)
+                    return;
+
+                // IDataSetSelectionAction<TEntry>.Execute takes IList<TEntry>; the closed generic is
+                // only known at runtime, so the one-element list is built for the actual entry type.
+                var list = (IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(entryType))!;
+                list.Add(entity);
+
+                var executeMethod = openCardPageAction.GetType().GetMethod(
+                    nameof(IAction<object>.Execute), new[] { typeof(IList<>).MakeGenericType(entryType) });
+                executeMethod?.Invoke(openCardPageAction, new object[] { list });
+            };
+        }
+
         // Drag & drop row reordering (item 6), offered only for entities that carry an explicit
         // order. ISortableEntity is the same gate core Kapok uses to decide whether a list page
         // even offers its SortUp/SortDown actions (see ListPage<TEntry>'s constructor), and it is
         // what lets a drop write the new order back onto the entities instead of being a
         // client-side shuffle that the next Refresh() discards.
-        var entryType = readonlyGenericInterface.GetGenericArguments()[0];
         _dataGrid.CanUserReorderRows = typeof(Kapok.Entity.ISortableEntity).IsAssignableFrom(entryType);
 
         // Excel-style paste (item 5). CanUserPasteToNewRows follows DataSet.InsertAllowed, exactly

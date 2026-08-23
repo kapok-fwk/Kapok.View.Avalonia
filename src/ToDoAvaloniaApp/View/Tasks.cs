@@ -1,4 +1,5 @@
 using Kapok.View;
+using ToDoAvaloniaApp.DataModel;
 using Task = ToDoAvaloniaApp.DataModel.Task;
 
 namespace ToDoAvaloniaApp.View;
@@ -53,5 +54,20 @@ public class Tasks : ListPage<Task>
         // ListPage.cs), so creating a new Task now opens a real TaskCard dialog with a working
         // TaskListId lookup, rather than TaskCard being reachable only from test code.
         OpenCardPageAction = new UIOpenReferencedCardPageAction<Task>("OpenCardPage", typeof(TaskCard), ServiceProvider, DataSet);
+
+        // Real usage for the DataGridStyling row-colouring port: Kapok's EntryColoring event lets
+        // business logic decide a row's colours. Urgent tasks get a red-tinted row, overdue ones an
+        // amber one - the kind of rule this feature exists for, and the only way to verify that the
+        // grid actually asks the DataSet per row.
+        DataSet!.EntryColoring += (_, e) =>
+        {
+            if (e.Entity is not Task task)
+                return;
+
+            if (task.Priority == TaskPriority.Urgent)
+                e.BackgroundColor = System.Drawing.Color.FromArgb(255, 255, 220, 220);
+            else if (task.DueDate.HasValue && task.DueDate.Value.Date < DateTime.Today)
+                e.BackgroundColor = System.Drawing.Color.FromArgb(255, 255, 244, 214);
+        };
     }
 }
